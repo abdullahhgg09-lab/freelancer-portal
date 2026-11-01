@@ -1,0 +1,6 @@
+{
+  "name": "Freelancer Client Portal",
+  "description": "Complete SaaS platform for freelancers and clients to manage projects, invoices, files, messages, with an executive Super Admin panel and Supabase integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
