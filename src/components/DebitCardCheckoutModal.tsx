@@ -82,31 +82,37 @@ export const DebitCardCheckoutModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        
-        {/* Header */}
-        <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-400/30 flex items-center justify-center font-bold">
-              <CreditCard className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4">
+      <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
+        <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+          
+          {/* Header */}
+          <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-400/30 flex items-center justify-center font-bold">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base flex items-center gap-2">
+                  Debit Card Direct Bank Remittance
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Subscribe to {plan.name} Plan • Rs. {price.toLocaleString()} /mo
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-extrabold text-base flex items-center gap-2">
-                Debit Card Direct Bank Remittance
-              </h3>
-              <p className="text-xs text-slate-300">
-                Subscribe to {plan.name} Plan • Rs. {price.toLocaleString()} /mo
-              </p>
-            </div>
+            <button
+              onClick={handleClose}
+              aria-label="Close modal"
+              className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button onClick={handleClose} className="p-1 rounded-lg text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        {/* Success Confirmation Screen */}
-        {paymentSuccess ? (
+          <div className="overflow-y-auto">
+            {/* Success Confirmation Screen */}
+            {paymentSuccess ? (
           <div className="p-6 sm:p-8 text-center space-y-5">
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-md">
               <CheckCircle2 className="w-10 h-10" />
@@ -306,6 +312,8 @@ export const DebitCardCheckoutModal: React.FC = () => {
           </form>
         )}
 
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -56,35 +56,37 @@ export const SupabaseGuideModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
-        
-        {/* Modal Header */}
-        <div className="px-6 py-4 bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
-              <Database className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4 md:p-6">
+      <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
+        <div className="relative w-full max-w-4xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+          
+          {/* Modal Sticky Header */}
+          <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold flex items-center gap-2 truncate">
+                  Supabase Database Setup Guide
+                  <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                    PostgreSQL
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-300 truncate">
+                  Supabase database connect karne ka aasan aur mukammal tareeqa (Urdu &amp; English)
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                Supabase Database Setup Guide
-                <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  PostgreSQL
-                </span>
-              </h2>
-              <p className="text-xs text-slate-300">
-                Supabase database connect karne ka aasan aur mukammal tareeqa (Urdu & English)
-              </p>
-            </div>
-          </div>
 
-          <button
-            onClick={() => setIsSupabaseGuideOpen(false)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+            <button
+              onClick={() => setIsSupabaseGuideOpen(false)}
+              aria-label="Close"
+              className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
         {/* Tab Bar */}
         <div className="flex border-b border-slate-200 bg-slate-50 px-6 gap-2 pt-2">
@@ -359,5 +361,6 @@ export const SupabaseGuideModal: React.FC = () => {
 
       </div>
     </div>
+  </div>
   );
 };

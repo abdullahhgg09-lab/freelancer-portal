@@ -30,7 +30,8 @@ export const ClientPortal: React.FC = () => {
     messages,
     currency,
     markInvoicePaid,
-    sendMessage
+    sendMessage,
+    setSelectedInvoiceForPayment
   } = usePortal();
 
   const [activeTab, setActiveTab] = useState<'projects' | 'files' | 'invoices' | 'chat'>('projects');
@@ -63,9 +64,7 @@ export const ClientPortal: React.FC = () => {
   };
 
   const handlePayInvoice = (inv: Invoice) => {
-    markInvoicePaid(inv.id);
-    setPaySuccessMsg(`Payment of ${formatCurrency(inv.total, inv.currency)} completed successfully!`);
-    setTimeout(() => setPaySuccessMsg(null), 4000);
+    setSelectedInvoiceForPayment(inv);
   };
 
   return (
@@ -429,41 +428,55 @@ export const ClientPortal: React.FC = () => {
 
       {/* Invoice receipt modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <span className="font-bold text-slate-900 text-sm">Invoice Receipt {selectedInvoice.invoiceNumber}</span>
-              <button onClick={() => setSelectedInvoice(null)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4">
+          <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
+            <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+              <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+                <div>
+                  <h3 className="font-bold text-slate-100 text-base">Invoice Receipt {selectedInvoice.invoiceNumber}</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Billing payment proof and receipt summary</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvoice(null)}
+                  aria-label="Close receipt"
+                  className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <div className="space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Project:</span>
-                <span className="font-semibold text-slate-800">{selectedInvoice.projectName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Freelancer:</span>
-                <span className="font-semibold text-slate-800">{selectedInvoice.freelancerName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Status:</span>
-                <span className="font-bold uppercase text-emerald-700">{selectedInvoice.status}</span>
-              </div>
-              <div className="flex justify-between pt-2 border-t border-slate-100 font-bold text-sm text-slate-900">
-                <span>Total Amount:</span>
-                <span>{formatCurrency(selectedInvoice.total, selectedInvoice.currency)}</span>
+              <div className="overflow-y-auto p-5 sm:p-6 space-y-4 text-xs">
+                <div className="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Project:</span>
+                    <span className="font-semibold text-slate-800">{selectedInvoice.projectName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Freelancer:</span>
+                    <span className="font-semibold text-slate-800">{selectedInvoice.freelancerName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Payment Status:</span>
+                    <span className="font-bold uppercase text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
+                      {selectedInvoice.status}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-slate-200 font-bold text-sm text-slate-900">
+                    <span>Total Amount:</span>
+                    <span className="text-emerald-700">{formatCurrency(selectedInvoice.total, selectedInvoice.currency)}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => window.print()}
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold flex items-center justify-center gap-2 shadow-xs transition cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print / Save PDF Receipt</span>
+                </button>
               </div>
             </div>
-
-            <button
-              onClick={() => window.print()}
-              className="w-full py-2 bg-slate-900 text-white rounded-xl font-semibold flex items-center justify-center gap-2"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              Print Receipt
-            </button>
           </div>
         </div>
       )}

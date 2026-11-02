@@ -111,9 +111,10 @@ export const AnimatedGuideVideo: React.FC<AnimatedGuideVideoProps> = ({ isModal 
           {isModal && onClose && (
             <button
               onClick={onClose}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              aria-label="Close"
+              className="p-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           )}
         </div>
@@ -354,9 +355,11 @@ export const AnimatedGuideVideo: React.FC<AnimatedGuideVideoProps> = ({ isModal 
 
   if (isModal) {
     return (
-      <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-        <div className="w-full max-w-4xl">
-          {content}
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md p-3 sm:p-6">
+        <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
+          <div className="w-full max-w-4xl my-auto animate-in fade-in zoom-in-95 duration-150">
+            {content}
+          </div>
         </div>
       </div>
     );

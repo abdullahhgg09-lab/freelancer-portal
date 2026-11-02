@@ -10,8 +10,9 @@ import { AuthModal } from './components/AuthModal';
 import { AuthPage } from './components/AuthPage';
 import { UserProfilePage } from './components/UserProfilePage';
 import { AnimatedGuideVideo } from './components/AnimatedGuideVideo';
-import { DebitCardCheckoutModal } from './components/DebitCardCheckoutModal';
-import { Layers, ShieldCheck, Database, LogIn, User, Play } from 'lucide-react';
+import { RealTimePaymentModal } from './components/RealTimePaymentModal';
+import { LiveDeploymentModal } from './components/LiveDeploymentModal';
+import { Layers, ShieldCheck, Database, LogIn, User, Play, Rocket } from 'lucide-react';
 import { UserRole } from './types';
 
 function MainAppContent() {
@@ -21,7 +22,10 @@ function MainAppContent() {
     setIsSupabaseGuideOpen,
     supabaseConfig,
     isGuideVideoOpen,
-    setIsGuideVideoOpen
+    setIsGuideVideoOpen,
+    isDeploymentModalOpen,
+    setIsDeploymentModalOpen,
+    isProductionMode
   } = usePortal();
   
   // When website is opened: if no session, open on 'auth' gate as requested by user;
@@ -145,7 +149,26 @@ function MainAppContent() {
           </div>
 
           <div className="flex items-center gap-2 text-slate-500 font-medium">
-            <span>: <code className="bg-slate-100 px-2 py-0.5 rounded text-indigo-700 font-bold font-mono tracking-wide">ABBDULLAH</code></span>
+            <button
+              onClick={() => setCurrentView('admin')}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                currentView === 'admin'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-indigo-700'
+              }`}
+              title="ABBDULLAH - Open Bank & Debit Card Settlement Center"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-slate-400">Owner:</span>
+              <code className="font-mono tracking-wide">ABBDULLAH</code>
+            </button>
+            <button
+              onClick={() => setIsDeploymentModalOpen(true)}
+              className="px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+              title="Cloud Run Live Link & Sandbox Exit"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Live Production</span>
+            </button>
           </div>
         </div>
       </div>
@@ -193,8 +216,11 @@ function MainAppContent() {
         />
       )}
 
-      {/* User Requested Pro Plan Debit Card / Bank Remittance Modal */}
-      <DebitCardCheckoutModal />
+      {/* Real-time Global Multi-Currency Payment Modal (Direct Remittance to Abdullah) */}
+      <RealTimePaymentModal />
+
+      {/* Live Production & Sandbox Exit Modal */}
+      <LiveDeploymentModal />
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-8 text-xs text-slate-500 mt-auto">

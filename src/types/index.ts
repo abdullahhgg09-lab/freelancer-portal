@@ -164,3 +164,41 @@ export interface SupabaseConfig {
   lastTestedAt?: string;
   tableNamePrefix?: string;
 }
+
+export interface PayoutSettings {
+  beneficiaryName: string;
+  accountTitle: string;
+  bankName: string;
+  cardNumberMasked: string;
+  rawCardDigits: string;
+  iban: string;
+  swiftBic: string;
+  raastId: string;
+  settlementCurrency: 'PKR' | 'USD';
+  isProductionLive: boolean;
+  gatewayMode: 'live' | 'sandbox';
+  gatewayProvider: 'direct_card' | 'stripe' | 'sadabiz' | 'payoneer';
+  stripePublishableKey?: string;
+  autoDepositEnabled: boolean;
+  totalEarningsReceivedPkr: number;
+  lastPayoutAt?: string;
+}
+
+export interface RealtimePaymentRecord {
+  id: string;
+  transactionRef: string;
+  senderName: string;
+  senderEmail: string;
+  senderCountry: string;
+  amountPaid: number;
+  currencyPaid: string;
+  amountReceivedPkr: number;
+  targetType: 'invoice' | 'subscription';
+  targetTitle: string;
+  beneficiaryName: string;
+  beneficiaryBank: string;
+  beneficiaryCardMasked: string;
+  status: 'settled' | 'processing';
+  timestamp: string;
+  paymentChannel: 'visa' | 'mastercard' | 'amex' | 'raast' | 'bank_wire';
+}

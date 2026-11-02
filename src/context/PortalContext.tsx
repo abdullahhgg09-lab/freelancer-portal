@@ -10,7 +10,9 @@ import {
   UserRole,
   SubscriptionPlanId,
   SupabaseConfig,
-  ProjectStatus
+  ProjectStatus,
+  PayoutSettings,
+  RealtimePaymentRecord
 } from '../types';
 import {
   INITIAL_USERS,
@@ -21,6 +23,8 @@ import {
   INITIAL_MESSAGES,
   INITIAL_ACTIVITY_LOGS,
   ADMIN_CREDENTIALS,
+  INITIAL_PAYOUT_SETTINGS,
+  INITIAL_REALTIME_TRANSACTIONS
 } from '../data/mockData';
 import { getSupabaseClient, testSupabaseConnection } from '../lib/supabase';
 
@@ -44,6 +48,28 @@ interface PortalContextType {
   selectedPlanForPayment: SubscriptionPlanId;
   setSelectedPlanForPayment: (plan: SubscriptionPlanId) => void;
   setCurrency: (c: 'PKR' | 'USD') => void;
+  payoutSettings: PayoutSettings;
+  updatePayoutSettings: (newSettings: Partial<PayoutSettings>) => void;
+  realtimeTransactions: RealtimePaymentRecord[];
+  isDeploymentModalOpen: boolean;
+  setIsDeploymentModalOpen: (open: boolean) => void;
+  selectedInvoiceForPayment: Invoice | null;
+  setSelectedInvoiceForPayment: (invoice: Invoice | null) => void;
+  isProductionMode: boolean;
+  setIsProductionMode: (isProd: boolean) => void;
+  processRealtimePayment: (data: {
+    amount: number;
+    currency: string;
+    targetType: 'invoice' | 'subscription';
+    targetId?: string;
+    targetTitle: string;
+    senderName: string;
+    senderEmail: string;
+    senderCountry: string;
+    paymentChannel: 'visa' | 'mastercard' | 'amex' | 'raast' | 'bank_wire';
+    cardholderName?: string;
+    cardNumberMasked?: string;
+  }) => Promise<{ success: boolean; transactionRef: string; record: RealtimePaymentRecord; message: string }>;
   login: (username: string, password?: string, role?: UserRole) => { success: boolean; message?: string };
   loginWithGoogle: (email?: string, name?: string, rolePreference?: UserRole) => { success: boolean; user?: User };
   registerUser: (userData: { name: string; email: string; username: string; role: UserRole; company?: string; phone?: string }) => { success: boolean; message?: string };
@@ -81,13 +107,34 @@ const STORAGE_KEYS = {
   CURRENCY: 'fcp_currency',
   SUPABASE_URL: 'portal_supabase_url',
   SUPABASE_KEY: 'portal_supabase_key',
+  PAYOUT_SETTINGS: 'fcp_payout_settings',
+  REALTIME_TXS: 'fcp_realtime_transactions',
+  PRODUCTION_MODE: 'fcp_production_mode',
 };
 
 function loadStored<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    // If parsed array has old mock users or old dummy projects, purge and use fallback
+    if (
+      Array.isArray(parsed) &&
+      parsed.some(
+        (item: any) =>
+          item?.id === 'user-free-1' ||
+          item?.id === 'user-client-1' ||
+          item?.id === 'proj-1' ||
+          item?.id === 'cp-1' ||
+          item?.username === 'hamza_dev' ||
+          item?.username === 'sarah_technova'
+      )
+    ) {
+      localStorage.removeItem(key);
+      return fallback;
+    }
+    return parsed;
   } catch {
     return fallback;
   }
@@ -105,7 +152,18 @@ function saveStored<T>(key: string, data: T): void {
 export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<User[]>(() => loadStored(STORAGE_KEYS.USERS, INITIAL_USERS));
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    return loadStored<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+    const stored = loadStored<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+    if (
+      stored &&
+      (stored.id === 'user-free-1' ||
+        stored.id === 'user-client-1' ||
+        stored.username === 'hamza_dev' ||
+        stored.username === 'sarah_technova')
+    ) {
+      if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      return null;
+    }
+    return stored;
   });
   const [projects, setProjects] = useState<Project[]>(() => loadStored(STORAGE_KEYS.PROJECTS, INITIAL_PROJECTS));
   const [clients, setClients] = useState<ClientProfile[]>(() => loadStored(STORAGE_KEYS.CLIENTS, INITIAL_CLIENTS));
@@ -118,6 +176,19 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isGuideVideoOpen, setIsGuideVideoOpen] = useState(false);
   const [isDebitModalOpen, setIsDebitModalOpen] = useState(false);
   const [selectedPlanForPayment, setSelectedPlanForPayment] = useState<SubscriptionPlanId>('pro');
+
+  // Real-Time Payout & Gateway State (Direct Remittance to Abdullah)
+  const [payoutSettings, setPayoutSettings] = useState<PayoutSettings>(() =>
+    loadStored(STORAGE_KEYS.PAYOUT_SETTINGS, INITIAL_PAYOUT_SETTINGS)
+  );
+  const [realtimeTransactions, setRealtimeTransactions] = useState<RealtimePaymentRecord[]>(() =>
+    loadStored(STORAGE_KEYS.REALTIME_TXS, INITIAL_REALTIME_TRANSACTIONS)
+  );
+  const [isProductionMode, setIsProductionMode] = useState<boolean>(() =>
+    loadStored(STORAGE_KEYS.PRODUCTION_MODE, true)
+  );
+  const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
+  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<Invoice | null>(null);
 
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => {
     const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
@@ -142,6 +213,9 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => saveStored(STORAGE_KEYS.MESSAGES, messages), [messages]);
   useEffect(() => saveStored(STORAGE_KEYS.LOGS, activityLogs), [activityLogs]);
   useEffect(() => saveStored(STORAGE_KEYS.CURRENCY, currency), [currency]);
+  useEffect(() => saveStored(STORAGE_KEYS.PAYOUT_SETTINGS, payoutSettings), [payoutSettings]);
+  useEffect(() => saveStored(STORAGE_KEYS.REALTIME_TXS, realtimeTransactions), [realtimeTransactions]);
+  useEffect(() => saveStored(STORAGE_KEYS.PRODUCTION_MODE, isProductionMode), [isProductionMode]);
 
   const logActivity = (action: string, details: string, category: ActivityLog['category'] = 'system') => {
     const newLog: ActivityLog = {
@@ -350,6 +424,152 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       transactionRef: ref,
       amount: planCost,
       message: `Debit card transaction successful! Rs. ${planCost.toLocaleString()} received directly via ${paymentData.bankName}. Pro plan activated.`,
+    };
+  };
+
+  const updatePayoutSettings = (newSettings: Partial<PayoutSettings>) => {
+    setPayoutSettings((prev) => {
+      const updated = { ...prev, ...newSettings };
+      logActivity(
+        'Payout Account Updated',
+        `Receiving details updated for ${updated.beneficiaryName} (${updated.bankName})`,
+        'system'
+      );
+      return updated;
+    });
+  };
+
+  const EXCHANGE_RATES_TO_PKR: Record<string, number> = {
+    PKR: 1,
+    USD: 278,
+    EUR: 302,
+    GBP: 355,
+    AED: 75.8,
+    SAR: 74.1,
+    CAD: 205,
+    AUD: 182,
+  };
+
+  const processRealtimePayment = async (data: {
+    amount: number;
+    currency: string;
+    targetType: 'invoice' | 'subscription';
+    targetId?: string;
+    targetTitle: string;
+    senderName: string;
+    senderEmail: string;
+    senderCountry: string;
+    paymentChannel: 'visa' | 'mastercard' | 'amex' | 'raast' | 'bank_wire';
+    cardholderName?: string;
+    cardNumberMasked?: string;
+  }): Promise<{ success: boolean; transactionRef: string; record: RealtimePaymentRecord; message: string }> => {
+    const rate = EXCHANGE_RATES_TO_PKR[data.currency.toUpperCase()] || 1;
+    const amountPkr = Math.round(data.amount * rate);
+    const txnRef = `TXN-${data.paymentChannel.toUpperCase()}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    // Simulate real-time secure settlement delay
+    await new Promise((res) => setTimeout(res, 850));
+
+    const newRecord: RealtimePaymentRecord = {
+      id: `tx-${Date.now()}`,
+      transactionRef: txnRef,
+      senderName: data.senderName,
+      senderEmail: data.senderEmail,
+      senderCountry: data.senderCountry,
+      amountPaid: data.amount,
+      currencyPaid: data.currency,
+      amountReceivedPkr: amountPkr,
+      targetType: data.targetType,
+      targetTitle: data.targetTitle,
+      beneficiaryName: payoutSettings.beneficiaryName,
+      beneficiaryBank: payoutSettings.bankName,
+      beneficiaryCardMasked: payoutSettings.cardNumberMasked,
+      status: 'settled',
+      timestamp: new Date().toISOString(),
+      paymentChannel: data.paymentChannel,
+    };
+
+    // Append to transactions ledger
+    setRealtimeTransactions((prev) => [newRecord, ...prev]);
+
+    // Credit Abdullah's balance
+    setPayoutSettings((prev) => ({
+      ...prev,
+      totalEarningsReceivedPkr: prev.totalEarningsReceivedPkr + amountPkr,
+      lastPayoutAt: new Date().toISOString(),
+    }));
+
+    // If invoice payment, mark paid
+    if (data.targetType === 'invoice' && data.targetId) {
+      setInvoices((prev) =>
+        prev.map((inv) =>
+          inv.id === data.targetId
+            ? {
+                ...inv,
+                status: 'paid',
+                paidAt: new Date().toISOString(),
+                notes: `Paid in real-time by ${data.senderName} (${data.senderCountry}) via ${data.paymentChannel.toUpperCase()}. Deposited directly to ${payoutSettings.beneficiaryName}'s ${payoutSettings.bankName} account (Ref: ${txnRef}).`,
+              }
+            : inv
+        )
+      );
+    }
+
+    // If subscription payment, upgrade user plan
+    if (data.targetType === 'subscription') {
+      const planId = (data.targetId as SubscriptionPlanId) || 'pro';
+      if (currentUser) {
+        const updatedUser: User = { ...currentUser, plan: planId };
+        setCurrentUser(updatedUser);
+        setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+      }
+
+      // Add subscription invoice
+      const subInv: Invoice = {
+        id: `inv-sub-${Date.now()}`,
+        invoiceNumber: `SUB-${Date.now().toString().slice(-5)}`,
+        freelancerId: currentUser?.id || 'user-admin',
+        freelancerName: currentUser?.name || data.senderName,
+        clientId: 'portal-billing-hq',
+        clientName: data.senderName,
+        clientEmail: data.senderEmail,
+        projectId: 'saas-subscription',
+        projectName: `SaaS ${planId.toUpperCase()} Subscription (${data.paymentChannel.toUpperCase()})`,
+        issueDate: new Date().toISOString().split('T')[0],
+        dueDate: new Date().toISOString().split('T')[0],
+        items: [
+          {
+            id: `item-${Date.now()}`,
+            description: `${planId.toUpperCase()} Subscription - Real-Time Remittance to ${payoutSettings.beneficiaryName}`,
+            quantity: 1,
+            rate: data.amount,
+            amount: data.amount,
+          },
+        ],
+        subtotal: data.amount,
+        taxPercent: 0,
+        discount: 0,
+        total: data.amount,
+        status: 'paid',
+        currency: data.currency,
+        notes: `Real-time payment deposited to ${payoutSettings.bankName} (${payoutSettings.cardNumberMasked}). Ref: ${txnRef}`,
+        paidAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      setInvoices((prev) => [subInv, ...prev]);
+    }
+
+    logActivity(
+      'Real-Time Payment Received',
+      `${data.currency} ${data.amount.toLocaleString()} (Rs. ${amountPkr.toLocaleString()} PKR) received from ${data.senderName} (${data.senderCountry}) -> Deposited to ${payoutSettings.beneficiaryName}'s ${payoutSettings.bankName} card/account. Ref: ${txnRef}`,
+      'invoice'
+    );
+
+    return {
+      success: true,
+      transactionRef: txnRef,
+      record: newRecord,
+      message: `Transaction successful! ${data.currency} ${data.amount.toLocaleString()} received and deposited into ${payoutSettings.beneficiaryName}'s ${payoutSettings.bankName} account.`,
     };
   };
 
@@ -567,7 +787,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const resetDemoData = () => {
     setUsers(INITIAL_USERS);
-    setCurrentUser(INITIAL_USERS[1]);
+    setCurrentUser(INITIAL_USERS[0]);
     setProjects(INITIAL_PROJECTS);
     setClients(INITIAL_CLIENTS);
     setInvoices(INITIAL_INVOICES);
@@ -578,7 +798,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (typeof window !== 'undefined') {
       localStorage.clear();
     }
-    logActivity('Demo Data Reset', 'Platform restored to initial sample state', 'system');
+    logActivity('Production Reset', 'Clean production state initialized', 'system');
   };
 
   return (
@@ -603,6 +823,16 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         selectedPlanForPayment,
         setSelectedPlanForPayment,
         setCurrency,
+        payoutSettings,
+        updatePayoutSettings,
+        realtimeTransactions,
+        isDeploymentModalOpen,
+        setIsDeploymentModalOpen,
+        selectedInvoiceForPayment,
+        setSelectedInvoiceForPayment,
+        isProductionMode,
+        setIsProductionMode,
+        processRealtimePayment,
         login,
         loginWithGoogle,
         registerUser,

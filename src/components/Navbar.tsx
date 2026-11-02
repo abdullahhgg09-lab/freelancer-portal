@@ -11,7 +11,9 @@ import {
   Play,
   User,
   Menu,
-  X
+  X,
+  Rocket,
+  CreditCard
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -29,7 +31,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
     setCurrency,
     setIsSupabaseGuideOpen,
     setIsGuideVideoOpen,
-    supabaseConfig
+    setIsDeploymentModalOpen,
+    setIsDebitModalOpen,
+    supabaseConfig,
+    payoutSettings
   } = usePortal();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -97,6 +102,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
             >
               <Play className="w-3.5 h-3.5 fill-indigo-600 text-indigo-600" />
               <span>Guide Video</span>
+            </button>
+
+            {/* Live App Hub Trigger */}
+            <button
+              onClick={() => setIsDeploymentModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold shadow-xs transition"
+              title="Cloud Run Live Public Link & Sandbox Exit"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <Rocket className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Live App</span>
             </button>
 
             {/* Supabase Integration Button */}
