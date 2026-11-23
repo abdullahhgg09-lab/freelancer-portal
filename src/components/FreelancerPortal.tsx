@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { usePortal } from '../context/PortalContext';
 import {
   Briefcase,
@@ -8,16 +9,11 @@ import {
   MessageSquare,
   Sparkles,
   Plus,
-  Search,
   CheckCircle2,
-  Clock,
-  ArrowRight,
   TrendingUp,
   CreditCard,
-  DollarSign,
   Download,
   Trash2,
-  Send,
   Upload,
   Calendar,
   Check,
@@ -26,12 +22,14 @@ import {
   ExternalLink,
   ChevronRight,
   Share2,
-  Copy
+  Copy,
+  ArrowRight
 } from 'lucide-react';
 import { computeFreelancerStats, formatCurrency, calculateInvoiceTotals } from '../utils/calculations';
-import { Project, ProjectStatus, InvoiceItem, Invoice, SubscriptionPlanId } from '../types';
+import { Project, ProjectStatus, Invoice } from '../types';
 import { SUBSCRIPTION_PLANS } from '../data/mockData';
 import { RecentProjectsWidget } from './RecentProjectsWidget';
+import { ProjectChatRoom } from './ProjectChatRoom';
 
 export const FreelancerPortal: React.FC = () => {
   const {
@@ -55,10 +53,12 @@ export const FreelancerPortal: React.FC = () => {
     upgradePlan,
     setIsDebitModalOpen,
     setSelectedPlanForPayment,
-    switchRole
+    switchRole,
+    openProjectChat
   } = usePortal();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'clients' | 'invoices' | 'files' | 'messages' | 'plans'>('overview');
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
 
   // Modals
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
@@ -104,9 +104,8 @@ export const FreelancerPortal: React.FC = () => {
   const [fileNameInput, setFileNameInput] = useState('');
   const [fileCategory, setFileCategory] = useState<'deliverable' | 'contract' | 'design' | 'brief'>('deliverable');
 
-  // Chat State
-  const [selectedChatClient, setSelectedChatClient] = useState<string>(clients[0]?.userId || '');
-  const [chatMessageText, setChatMessageText] = useState('');
+  // Project-scoped Chat Selection
+  const [selectedChatProjId, setSelectedChatProjId] = useState<string>(projects[0]?.id || '');
 
   const freelancerId = currentUser?.id || 'user-free-1';
   const stats = computeFreelancerStats(projects, invoices, freelancerId);
@@ -116,6 +115,14 @@ export const FreelancerPortal: React.FC = () => {
   const myInvoices = invoices.filter((i) => i.freelancerId === freelancerId || currentUser?.role === 'admin');
   const myClients = clients.filter((c) => c.freelancerId === freelancerId || currentUser?.role === 'admin');
   const myFiles = files;
+
+  useEffect(() => {
+    if (myProjects.length > 0 && !myProjects.some((p) => p.id === selectedChatProjId)) {
+      setSelectedChatProjId(myProjects[0].id);
+    }
+  }, [myProjects, selectedChatProjId]);
+
+  const selectedChatProject = myProjects.find((p) => p.id === selectedChatProjId) || myProjects[0] || null;
 
   // Handlers
   const handleOpenShareModal = (targetProj?: Project, targetClient?: any) => {
@@ -261,17 +268,9 @@ export const FreelancerPortal: React.FC = () => {
     setFileNameInput('');
   };
 
-  const handleSendChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatMessageText.trim()) return;
-    const target = clients.find((c) => c.userId === selectedChatClient) || clients[0];
-    sendMessage(
-      'proj-1',
-      chatMessageText.trim(),
-      target ? target.userId : 'user-client-1',
-      target ? target.name : 'Sarah Khan'
-    );
-    setChatMessageText('');
+  const handleDownloadFile = (fileName: string) => {
+    setDownloadNotice(`Preparing secure download: ${fileName}`);
+    setTimeout(() => setDownloadNotice(null), 3200);
   };
 
   const getStatusColor = (status: ProjectStatus) => {
@@ -338,117 +337,85 @@ export const FreelancerPortal: React.FC = () => {
           </div>
         </div>
 
-        {/* 5 KPI Metric Cards (as requested in Section 3 of PDF) */}
+        {/* 5 KPI Metric Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2">
-          
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
             <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Total Projects</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{stats.totalProjects}</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">Lifetime projects created</div>
+            <div className="font-display text-2xl font-bold text-slate-900 mt-1 tabular-nums">{stats.totalProjects}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Lifetime created</div>
           </div>
 
-          <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200/80">
-            <div className="text-[11px] font-semibold text-blue-700 uppercase tracking-wide">Active Projects</div>
-            <div className="text-2xl font-bold text-blue-900 mt-1">{stats.activeProjects}</div>
-            <div className="text-[10px] text-blue-600 mt-0.5">In Progress or Pending</div>
+          <div className="p-4 rounded-xl bg-indigo-50/50 border border-indigo-200/70">
+            <div className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wide">Active Projects</div>
+            <div className="font-display text-2xl font-bold text-indigo-950 mt-1 tabular-nums">{stats.activeProjects}</div>
+            <div className="text-[10px] text-indigo-600 mt-0.5">In progress / pending</div>
           </div>
 
-          <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200/80">
+          <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200/70">
             <div className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">Completed</div>
-            <div className="text-2xl font-bold text-emerald-900 mt-1">{stats.completedProjects}</div>
-            <div className="text-[10px] text-emerald-600 mt-0.5">Successfully delivered</div>
+            <div className="font-display text-2xl font-bold text-emerald-950 mt-1 tabular-nums">{stats.completedProjects}</div>
+            <div className="text-[10px] text-emerald-600 mt-0.5">Delivered</div>
           </div>
 
-          <div className="p-4 rounded-xl bg-emerald-50/80 border border-emerald-300">
+          <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200">
             <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wide">Total Earnings</div>
-            <div className="text-xl sm:text-2xl font-extrabold text-emerald-900 mt-1">
+            <div className="font-mono text-xl sm:text-2xl font-bold text-emerald-950 mt-1 tabular-nums">
               {formatCurrency(stats.totalEarnings, currency)}
             </div>
-            <div className="text-[10px] text-emerald-700 mt-0.5">Paid invoices received</div>
+            <div className="text-[10px] text-emerald-700 mt-0.5">Paid invoices</div>
           </div>
 
-          <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-300 col-span-2 md:col-span-1">
-            <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Pending Payments</div>
-            <div className="text-xl sm:text-2xl font-extrabold text-amber-900 mt-1">
+          <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 col-span-2 md:col-span-1">
+            <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Pending Due</div>
+            <div className="font-mono text-xl sm:text-2xl font-bold text-amber-950 mt-1 tabular-nums">
               {formatCurrency(stats.pendingPayments, currency)}
             </div>
-            <div className="text-[10px] text-amber-700 mt-0.5">Awaiting client payment</div>
+            <div className="text-[10px] text-amber-700 mt-0.5">Awaiting settlement</div>
           </div>
-
         </div>
       </div>
 
-      {/* Tabs navigation */}
-      <div className="flex items-center gap-1.5 border-b border-slate-200 overflow-x-auto pb-1">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'overview' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Briefcase className="w-3.5 h-3.5" />
-          Dashboard Overview
-        </button>
+      {downloadNotice && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
+          <span>{downloadNotice}</span>
+        </div>
+      )}
 
-        <button
-          onClick={() => setActiveTab('projects')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'projects' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Briefcase className="w-3.5 h-3.5" />
-          Projects ({myProjects.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clients')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'clients' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5" />
-          Clients ({myClients.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('invoices')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'invoices' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          Invoices & Billing ({myInvoices.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('files')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'files' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <FolderOpen className="w-3.5 h-3.5" />
-          Files & Deliverables ({myFiles.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('messages')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          Client Messages
-        </button>
-
-        <button
-          onClick={() => setActiveTab('plans')}
-          className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === 'plans' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          SaaS Pricing Plans
-        </button>
+      {/* Animated Workspace Tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
+        {[
+          { id: 'overview', label: 'Overview', icon: Briefcase },
+          { id: 'projects', label: `Projects (${myProjects.length})`, icon: Briefcase },
+          { id: 'clients', label: `Clients (${myClients.length})`, icon: Users },
+          { id: 'invoices', label: `Invoices (${myInvoices.length})`, icon: FileText },
+          { id: 'files', label: `Deliverables (${myFiles.length})`, icon: FolderOpen },
+          { id: 'messages', label: `Project Chats (${messages.length})`, icon: MessageSquare },
+          { id: 'plans', label: 'SaaS Plans', icon: Sparkles },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as typeof activeTab)}
+              className={`relative px-3.5 py-2.5 text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                isActive ? 'text-indigo-700' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{tab.label}</span>
+              {isActive && (
+                <motion.span
+                  layoutId="freelancer-portal-tab"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute bottom-0 left-2 right-2 h-0.5 bg-indigo-600 rounded-full"
+                />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab 1: Overview */}
@@ -572,21 +539,32 @@ export const FreelancerPortal: React.FC = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
-                        onClick={() => handleOpenShareModal(proj)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold flex items-center gap-1 text-xs transition cursor-pointer"
-                        title="Share this project link directly with the client"
+                        type="button"
+                        onClick={() => openProjectChat(proj.id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-indigo-600 font-semibold flex items-center gap-1.5 text-xs transition cursor-pointer tabular-nums"
+                        title="Chat directly with the client about this project"
                       >
-                        <Share2 className="w-3.5 h-3.5" />
-                        <span>Share Client Link</span>
+                        <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Discuss Project ({messages.filter((m) => m.projectId === proj.id).length})</span>
                       </button>
                       <button
+                        type="button"
+                        onClick={() => handleOpenShareModal(proj)}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold flex items-center gap-1 text-xs transition cursor-pointer"
+                        title="Share this project link directly with the client"
+                      >
+                        <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Share Link</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => switchRole('client', proj.clientId)}
                         className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 cursor-pointer"
                       >
-                        <span>Preview</span>
-                        <ChevronRight className="w-3 h-3" />
+                        <span>Client Preview</span>
+                        <ChevronRight className="w-3 h-3" aria-hidden="true" />
                       </button>
                     </div>
 
@@ -654,16 +632,16 @@ export const FreelancerPortal: React.FC = () => {
               </div>
             </div>
 
-            {/* Recent Activities (Section 3 of PDF) */}
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <h3 className="font-bold text-slate-900 text-sm">Recent Activities</h3>
-              
-              <div className="space-y-3">
+            {/* Recent Activities */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs space-y-3">
+              <h3 className="font-display font-bold text-slate-900 text-sm">Recent Activities</h3>
+
+              <div className="divide-y divide-slate-100">
                 {activityLogs.slice(0, 5).map((log) => (
-                  <div key={log.id} className="text-xs space-y-0.5 border-l-2 border-indigo-400 pl-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-800">{log.action}</span>
-                      <span className="text-[10px] text-slate-400">
+                  <div key={log.id} className="text-xs py-2.5 first:pt-0 last:pb-0 space-y-0.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 truncate">{log.action}</span>
+                      <span className="text-[10px] text-slate-400 font-mono tabular-nums shrink-0">
                         {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -748,20 +726,30 @@ export const FreelancerPortal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
                   <button
-                    onClick={() => handleOpenShareModal(p)}
-                    className="flex-1 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold flex items-center justify-center gap-1 text-xs transition cursor-pointer"
+                    type="button"
+                    onClick={() => openProjectChat(p.id)}
+                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-indigo-600 text-white font-semibold flex items-center justify-center gap-1.5 text-xs transition cursor-pointer tabular-nums"
                   >
-                    <Share2 className="w-3.5 h-3.5" />
+                    <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Chat ({messages.filter((m) => m.projectId === p.id).length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenShareModal(p)}
+                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold flex items-center justify-center gap-1 text-xs transition cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Share Link</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => switchRole('client', p.clientId)}
-                    className="flex-1 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold flex items-center justify-center gap-1 text-xs transition cursor-pointer"
+                    className="py-1.5 px-2.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold flex items-center justify-center gap-1 text-xs transition cursor-pointer"
                   >
-                    <span>Client View</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <span>View</span>
+                    <ExternalLink className="w-3 h-3" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -967,16 +955,20 @@ export const FreelancerPortal: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => alert(`Simulating secure download for: ${file.fileName}`)}
-                    className="p-2 rounded-lg bg-white border border-slate-200 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 transition"
+                    type="button"
+                    onClick={() => handleDownloadFile(file.fileName)}
+                    className="p-2 rounded-lg bg-white border border-slate-200 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 transition cursor-pointer"
                     title="Download"
+                    aria-label={`Download ${file.fileName}`}
                   >
                     <Download className="w-4 h-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => deleteFile(file.id)}
-                    className="p-2 rounded-lg bg-white border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition"
+                    className="p-2 rounded-lg bg-white border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                     title="Delete"
+                    aria-label={`Delete ${file.fileName}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -987,102 +979,84 @@ export const FreelancerPortal: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 6: Messages */}
+      {/* Tab 6: Project Discussion Rooms */}
       {activeTab === 'messages' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[500px]">
-          
-          {/* Client chat list */}
-          <div className="border-r border-slate-200 p-4 space-y-3 bg-slate-50/50">
-            <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Client Conversations</h3>
-            <div className="space-y-1">
-              {clients.map((c) => (
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[540px]">
+          {/* Project Room Selector */}
+          <div className="border-b md:border-b-0 md:border-r border-slate-200 p-4 space-y-3 bg-slate-50/50">
+            <div>
+              <h3 className="font-display font-bold text-slate-950 text-xs uppercase tracking-wider">
+                Project Discussion Rooms
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Select a project to talk with its client in real-time
+              </p>
+            </div>
+
+            {myProjects.length === 0 ? (
+              <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-3 text-xs text-slate-600">
+                <p>No active projects yet. Create a project to unlock its dedicated real-time client chat room.</p>
                 <button
-                  key={c.id}
-                  onClick={() => setSelectedChatClient(c.userId)}
-                  className={`w-full p-3 rounded-xl text-left transition flex items-center gap-3 ${
-                    selectedChatClient === c.userId
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                  }`}
+                  type="button"
+                  onClick={() => setIsNewProjectModalOpen(true)}
+                  className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                      selectedChatClient === c.userId ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
-                    }`}
-                  >
-                    {c.name.charAt(0)}
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs">{c.name}</div>
-                    <div className={`text-[10px] ${selectedChatClient === c.userId ? 'text-indigo-100' : 'text-slate-400'}`}>
-                      {c.company}
-                    </div>
-                  </div>
+                  <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>New Project</span>
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Chat thread */}
-          <div className="md:col-span-2 flex flex-col justify-between p-4 bg-white">
-            <div className="border-b border-slate-100 pb-3 mb-3 flex items-center justify-between">
-              <div>
-                <h4 className="font-bold text-slate-900 text-sm">
-                  {clients.find((c) => c.userId === selectedChatClient)?.name || 'Client Chat'}
-                </h4>
-                <p className="text-[11px] text-slate-400">Direct secure client messaging</p>
               </div>
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                Online
-              </span>
-            </div>
-
-            {/* Messages box */}
-            <div className="flex-1 overflow-y-auto space-y-3 p-2 max-h-[350px]">
-              {messages.map((m) => {
-                const isMe = m.senderId === freelancerId;
-                return (
-                  <div
-                    key={m.id}
-                    className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`max-w-md p-3.5 rounded-2xl text-xs ${
-                        isMe
-                          ? 'bg-indigo-600 text-white rounded-br-none shadow-xs'
-                          : 'bg-slate-100 text-slate-800 rounded-bl-none'
+            ) : (
+              <div className="space-y-1.5">
+                {myProjects.map((proj) => {
+                  const isSelected = selectedChatProject?.id === proj.id;
+                  const count = messages.filter((m) => m.projectId === proj.id).length;
+                  return (
+                    <button
+                      key={proj.id}
+                      type="button"
+                      onClick={() => setSelectedChatProjId(proj.id)}
+                      className={`w-full p-3 rounded-xl text-left transition flex items-start justify-between gap-2 cursor-pointer ${
+                        isSelected
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
                       }`}
                     >
-                      <div className="font-bold text-[10px] opacity-80 mb-1">{m.senderName}</div>
-                      <p>{m.content}</p>
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-1">
-                      {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Chat input */}
-            <form onSubmit={handleSendChat} className="mt-3 pt-3 border-t border-slate-100 flex gap-2">
-              <input
-                type="text"
-                placeholder="Type your message to client..."
-                value={chatMessageText}
-                onChange={(e) => setChatMessageText(e.target.value)}
-                className="flex-1 px-4 py-2.5 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition flex items-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send</span>
-              </button>
-            </form>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-xs truncate">{proj.name}</div>
+                        <div className={`text-[10px] mt-0.5 truncate ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
+                          Client: {proj.clientName} · {proj.progress}%
+                        </div>
+                      </div>
+                      {count > 0 && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-bold tabular-nums shrink-0 ${
+                            isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
+          {/* Active Project Chat Room */}
+          <div className="md:col-span-2 flex flex-col min-h-[480px]">
+            {selectedChatProject ? (
+              <ProjectChatRoom project={selectedChatProject} />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-2 text-slate-500 text-xs">
+                <MessageSquare className="w-8 h-8 text-slate-300" aria-hidden="true" />
+                <div className="font-semibold text-slate-800 text-sm">Start Discussing Your Project</div>
+                <p className="max-w-xs">
+                  Create or select a project to collaborate directly with your client in real time.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -291,10 +291,11 @@ export const AdminPanel: React.FC = () => {
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
+                  <label htmlFor="admin-beneficiary-name" className="block font-bold text-slate-700 mb-1">
                     Beneficiary Name (Account Title)
                   </label>
                   <input
+                    id="admin-beneficiary-name"
                     type="text"
                     required
                     value={editBeneficiary}
@@ -309,10 +310,11 @@ export const AdminPanel: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
+                  <label htmlFor="admin-bank-name" className="block font-bold text-slate-700 mb-1">
                     Receiving Bank Name
                   </label>
                   <input
+                    id="admin-bank-name"
                     type="text"
                     required
                     value={editBank}
@@ -326,11 +328,12 @@ export const AdminPanel: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
+                  <label htmlFor="admin-card-digits" className="block font-bold text-slate-700 mb-1">
                     Debit Card (Front 16 Digits)
                   </label>
                   <div className="relative">
                     <input
+                      id="admin-card-digits"
                       type="text"
                       required
                       value={editCardDigits}
@@ -338,16 +341,17 @@ export const AdminPanel: React.FC = () => {
                       placeholder="e.g. 4242 8821 9920 8821"
                       className="w-full pl-9 pr-3.5 py-2.5 border border-slate-300 rounded-xl font-mono font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                     />
-                    <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-3" aria-hidden="true" />
                   </div>
                   <span className="text-[10px] text-slate-400 mt-0.5 block">Card ke samne likha 16-digit number</span>
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
+                  <label htmlFor="admin-raast-id" className="block font-bold text-slate-700 mb-1">
                     Raast ID / Registered Mobile Number
                   </label>
                   <input
+                    id="admin-raast-id"
                     type="text"
                     value={editRaast}
                     onChange={(e) => setEditRaast(e.target.value)}
@@ -359,10 +363,11 @@ export const AdminPanel: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label htmlFor="admin-bank-iban" className="block font-bold text-slate-700 mb-1">
                   Bank IBAN (24 Characters)
                 </label>
                 <input
+                  id="admin-bank-iban"
                   type="text"
                   required
                   value={editIban}
@@ -374,10 +379,11 @@ export const AdminPanel: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label htmlFor="admin-swift-bic" className="block font-bold text-slate-700 mb-1">
                   SWIFT / BIC Code (For Overseas Clients)
                 </label>
                 <input
+                  id="admin-swift-bic"
                   type="text"
                   value={editSwift}
                   onChange={(e) => setEditSwift(e.target.value)}

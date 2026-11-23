@@ -120,17 +120,32 @@ export interface ProjectFile {
   category: 'deliverable' | 'contract' | 'design' | 'asset' | 'brief';
 }
 
+export type MessageTag = 'general' | 'milestone' | 'revision' | 'deliverable' | 'payment';
+
 export interface Message {
   id: string;
   projectId: string;
+  projectName?: string;
   senderId: string;
   senderName: string;
   senderRole: UserRole;
   recipientId: string;
   recipientName: string;
   content: string;
+  tag?: MessageTag;
   timestamp: string;
   attachments?: string[];
+}
+
+export interface RoomParticipant {
+  userId: string;
+  userName: string;
+  userRole: string;
+}
+
+export interface TypingParticipant {
+  userId: string;
+  userName: string;
 }
 
 export interface ActivityLog {

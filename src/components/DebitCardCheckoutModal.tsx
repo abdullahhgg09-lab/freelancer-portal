@@ -81,10 +81,27 @@ export const DebitCardCheckoutModal: React.FC = () => {
     setIsDebitModalOpen(false);
   };
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDebitModalOpen) {
+        handleClose();
+      }
+    };
+    if (isDebitModalOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDebitModalOpen]);
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4">
       <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
-        <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="debit-checkout-title"
+          className="relative bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]"
+        >
           
           {/* Header */}
           <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
@@ -93,7 +110,7 @@ export const DebitCardCheckoutModal: React.FC = () => {
                 <CreditCard className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-extrabold text-base flex items-center gap-2">
+                <h3 id="debit-checkout-title" className="font-extrabold text-base flex items-center gap-2">
                   Debit Card Direct Bank Remittance
                 </h3>
                 <p className="text-xs text-slate-300">
@@ -102,8 +119,9 @@ export const DebitCardCheckoutModal: React.FC = () => {
               </div>
             </div>
             <button
+              type="button"
               onClick={handleClose}
-              aria-label="Close modal"
+              aria-label="Close Checkout Modal"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
             >
               <X className="w-5 h-5" />

@@ -56,6 +56,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
   const [customGoogleName, setCustomGoogleName] = useState('');
   const [showCustomGoogleInput, setShowCustomGoogleInput] = useState(false);
 
+  // Close Google modal on Escape key
+  React.useEffect(() => {
+    if (!isGoogleModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsGoogleModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isGoogleModalOpen]);
+
   // Trigger Google Sign-In Flow
   const openGoogleAuth = () => {
     setErrorMessage(null);
@@ -355,12 +367,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
             {authMode === 'signin' && (
               <form onSubmit={handleSignIn} className="space-y-3.5 text-xs">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label htmlFor="authpage-signin-username" className="block font-semibold text-slate-700 mb-1">
                     Username or Email
                   </label>
                   <div className="relative">
-                    <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" aria-hidden="true" />
                     <input
+                      id="authpage-signin-username"
                       type="text"
                       required
                       placeholder="e.g. your username or email"
@@ -372,12 +385,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label htmlFor="authpage-signin-password" className="block font-semibold text-slate-700 mb-1">
                     Password
                   </label>
                   <div className="relative">
-                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" aria-hidden="true" />
                     <input
+                      id="authpage-signin-password"
                       type={showPassword ? 'text' : 'password'}
                       required
                       placeholder="Enter password..."
@@ -388,9 +402,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                       className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showPassword ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
@@ -404,7 +419,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                   }`}
                 >
                   <span>Sign In as {selectedRole === 'freelancer' ? 'Freelancer' : 'Client'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </form>
             )}
@@ -414,8 +429,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
               <form onSubmit={handleRegister} className="space-y-3 text-xs">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Full Name</label>
+                    <label htmlFor="reg-fullname" className="block font-semibold text-slate-700 mb-1">Full Name</label>
                     <input
+                      id="reg-fullname"
                       type="text"
                       required
                       placeholder="e.g. Abdullah Khan"
@@ -425,8 +441,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Username</label>
+                    <label htmlFor="reg-username" className="block font-semibold text-slate-700 mb-1">Username</label>
                     <input
+                      id="reg-username"
                       type="text"
                       required
                       placeholder="e.g. abdullah_dev"
@@ -438,8 +455,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Email Address</label>
+                  <label htmlFor="reg-email" className="block font-semibold text-slate-700 mb-1">Email Address</label>
                   <input
+                    id="reg-email"
                     type="email"
                     required
                     placeholder="name@example.com"
@@ -451,8 +469,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Company / Studio</label>
+                    <label htmlFor="reg-company" className="block font-semibold text-slate-700 mb-1">Company / Studio</label>
                     <input
+                      id="reg-company"
                       type="text"
                       placeholder="e.g. Apex Studio"
                       value={regCompany}
@@ -461,8 +480,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Phone Number</label>
+                    <label htmlFor="reg-phone" className="block font-semibold text-slate-700 mb-1">Phone Number</label>
                     <input
+                      id="reg-phone"
                       type="text"
                       placeholder="+92 300 1234567"
                       value={regPhone}
@@ -473,8 +493,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Set Password</label>
+                  <label htmlFor="reg-password" className="block font-semibold text-slate-700 mb-1">Set Password</label>
                   <input
+                    id="reg-password"
                     type="password"
                     required
                     placeholder="Create a password (min 6 characters)"
@@ -493,7 +514,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                   }`}
                 >
                   <span>Create {selectedRole === 'freelancer' ? 'Freelancer' : 'Client'} Account</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </form>
             )}
@@ -522,14 +543,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
 
       {/* Real-Time Google OAuth / Identity Chooser Modal */}
       {isGoogleModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="google-auth-modal-title"
+          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4"
+        >
           <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
             <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
               
               {/* Google Brand Sticky Header */}
               <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                 <div className="flex items-center gap-3">
-                  <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                     <path
                       fill="#4285F4"
                       d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -548,13 +574,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                     />
                   </svg>
                   <div>
-                    <h4 className="font-bold text-slate-800 text-sm">Sign in with Google</h4>
+                    <h4 id="google-auth-modal-title" className="font-bold text-slate-800 text-sm">Sign in with Google</h4>
                     <p className="text-[11px] text-slate-500">to continue to FreelancePort.pk</p>
                   </div>
                 </div>
                 <button
                   onClick={() => setIsGoogleModalOpen(false)}
-                  aria-label="Close"
+                  aria-label="Close Google sign in dialog"
                   className="p-2 rounded-xl text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 transition cursor-pointer shrink-0 ml-2"
                 >
                   <X className="w-5 h-5" />
@@ -591,7 +617,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                         abdullahhgg09@gmail.com
                       </div>
                     </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition shrink-0" />
+                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition shrink-0" aria-hidden="true" />
                   </button>
 
                   {/* Toggle Custom Google Account */}
@@ -601,26 +627,34 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
                       onClick={() => setShowCustomGoogleInput(true)}
                       className="w-full py-2 px-3 text-xs text-indigo-600 font-semibold hover:bg-indigo-50/50 rounded-lg text-left transition cursor-pointer flex items-center gap-2"
                     >
-                      <User className="w-3.5 h-3.5" />
+                      <User className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>Use another Google account</span>
                     </button>
                   ) : (
                     <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs animate-in fade-in">
                       <div className="font-semibold text-slate-700">Enter Google Account Info:</div>
-                      <input
-                        type="text"
-                        placeholder="Your Name (e.g. Asad Client)"
-                        value={customGoogleName}
-                        onChange={(e) => setCustomGoogleName(e.target.value)}
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
-                      />
-                      <input
-                        type="email"
-                        placeholder="yourname@gmail.com"
-                        value={customGoogleEmail}
-                        onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
-                      />
+                      <div>
+                        <label htmlFor="custom-google-name" className="sr-only">Your Name</label>
+                        <input
+                          id="custom-google-name"
+                          type="text"
+                          placeholder="Your Name (e.g. Asad Client)"
+                          value={customGoogleName}
+                          onChange={(e) => setCustomGoogleName(e.target.value)}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="custom-google-email" className="sr-only">Google Email Address</label>
+                        <input
+                          id="custom-google-email"
+                          type="email"
+                          placeholder="yourname@gmail.com"
+                          value={customGoogleEmail}
+                          onChange={(e) => setCustomGoogleEmail(e.target.value)}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
+                        />
+                      </div>
                       <div className="flex justify-end gap-2 pt-1">
                         <button
                           type="button"

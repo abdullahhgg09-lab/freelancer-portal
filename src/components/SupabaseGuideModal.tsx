@@ -27,6 +27,18 @@ export const SupabaseGuideModal: React.FC = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [activeTab, setActiveTab] = useState<'guide' | 'sql' | 'connect'>('guide');
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isSupabaseGuideOpen) {
+        setIsSupabaseGuideOpen(false);
+      }
+    };
+    if (isSupabaseGuideOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSupabaseGuideOpen, setIsSupabaseGuideOpen]);
+
   if (!isSupabaseGuideOpen) return null;
 
   const handleCopySql = () => {
@@ -58,7 +70,12 @@ export const SupabaseGuideModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4 md:p-6">
       <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
-        <div className="relative w-full max-w-4xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="supabase-guide-title"
+          className="relative w-full max-w-4xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh] animate-in fade-in zoom-in-95 duration-150"
+        >
           
           {/* Modal Sticky Header */}
           <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
@@ -67,7 +84,7 @@ export const SupabaseGuideModal: React.FC = () => {
                 <Database className="w-5 h-5" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-base sm:text-lg font-bold flex items-center gap-2 truncate">
+                <h2 id="supabase-guide-title" className="text-base sm:text-lg font-bold flex items-center gap-2 truncate">
                   Supabase Database Setup Guide
                   <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                     PostgreSQL
@@ -80,8 +97,9 @@ export const SupabaseGuideModal: React.FC = () => {
             </div>
 
             <button
+              type="button"
               onClick={() => setIsSupabaseGuideOpen(false)}
-              aria-label="Close"
+              aria-label="Close Supabase Guide"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
             >
               <X className="w-5 h-5" />

@@ -1,10 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { avatarFreelancerProImg, avatarClientExecImg } from '../assets/images';
 import {
   User,
   Project,
   Invoice,
   ProjectFile,
   Message,
+  MessageTag,
+  RoomParticipant,
+  TypingParticipant,
   ActivityLog,
   ClientProfile,
   UserRole,
@@ -85,7 +89,23 @@ interface PortalContextType {
   markInvoicePaid: (id: string) => void;
   addFile: (data: Omit<ProjectFile, 'id' | 'uploadedAt'>) => ProjectFile;
   deleteFile: (id: string) => void;
-  sendMessage: (projectId: string, content: string, recipientId: string, recipientName: string) => Message;
+  sendMessage: (
+    projectId: string,
+    content: string,
+    recipientId: string,
+    recipientName: string,
+    tag?: MessageTag,
+    projectName?: string
+  ) => Message;
+  activeChatProjectId: string | null;
+  setActiveChatProjectId: (projectId: string | null) => void;
+  openProjectChat: (projectId: string) => void;
+  wsStatus: 'connecting' | 'connected' | 'offline';
+  roomPresence: Record<string, RoomParticipant[]>;
+  roomTyping: Record<string, TypingParticipant[]>;
+  joinProjectRoom: (projectId: string) => void;
+  leaveProjectRoom: (projectId: string) => void;
+  sendTypingState: (projectId: string, isTyping: boolean) => void;
   addClient: (data: Omit<ClientProfile, 'id' | 'createdAt'>) => ClientProfile;
   toggleUserStatus: (userId: string) => void;
   upgradePlan: (plan: SubscriptionPlanId) => void;
@@ -189,6 +209,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
   const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
   const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<Invoice | null>(null);
+  const [activeChatProjectId, setActiveChatProjectId] = useState<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'offline'>('connecting');
+  const [roomPresence, setRoomPresence] = useState<Record<string, RoomParticipant[]>>({});
+  const [roomTyping, setRoomTyping] = useState<Record<string, TypingParticipant[]>>({});
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const broadcastRef = useRef<BroadcastChannel | null>(null);
+  const joinedRoomsRef = useRef<Set<string>>(new Set());
 
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => {
     const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
@@ -216,6 +244,186 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => saveStored(STORAGE_KEYS.PAYOUT_SETTINGS, payoutSettings), [payoutSettings]);
   useEffect(() => saveStored(STORAGE_KEYS.REALTIME_TXS, realtimeTransactions), [realtimeTransactions]);
   useEffect(() => saveStored(STORAGE_KEYS.PRODUCTION_MODE, isProductionMode), [isProductionMode]);
+
+  const mergeIncomingMessages = useCallback((incomingList: Message[]) => {
+    if (!Array.isArray(incomingList) || incomingList.length === 0) return;
+    setMessages((prev) => {
+      const existingIds = new Set(prev.map((m) => m.id));
+      const newOnes = incomingList.filter((m) => m && m.id && !existingIds.has(m.id));
+      if (newOnes.length === 0) return prev;
+      return [...prev, ...newOnes].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+    });
+  }, []);
+
+  // Real-time WebSocket + BroadcastChannel connection
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Secondary multi-tab BroadcastChannel sync
+    if ('BroadcastChannel' in window) {
+      const channel = new BroadcastChannel('fcp_realtime_chat');
+      broadcastRef.current = channel;
+      channel.onmessage = (evt) => {
+        if (evt.data?.type === 'message:created' && evt.data.payload) {
+          mergeIncomingMessages([evt.data.payload as Message]);
+        }
+      };
+    }
+
+    // Initial REST hydration
+    fetch('/api/messages')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.messages) {
+          mergeIncomingMessages(data.messages);
+        }
+      })
+      .catch(() => {
+        // Fallback smoothly if running on static host
+      });
+
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let isUnmounted = false;
+    let attempt = 0;
+
+    const connectWs = () => {
+      if (isUnmounted) return;
+      setWsStatus('connecting');
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socket = new WebSocket(`${wsProto}//${window.location.host}/ws`);
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        attempt = 0;
+        setWsStatus('connected');
+        // Re-join any active rooms
+        for (const roomId of joinedRoomsRef.current) {
+          socket.send(
+            JSON.stringify({
+              type: 'room:join',
+              projectId: roomId,
+              userId: currentUser?.id || 'guest',
+              userName: currentUser?.name || 'Portal User',
+              userRole: currentUser?.role || 'client',
+            })
+          );
+        }
+      };
+
+      socket.onmessage = (evt) => {
+        try {
+          const event = JSON.parse(evt.data);
+          if (event.type === 'init:messages' && Array.isArray(event.payload)) {
+            mergeIncomingMessages(event.payload);
+          } else if (event.type === 'message:created' && event.payload) {
+            mergeIncomingMessages([event.payload as Message]);
+          } else if (event.type === 'presence:update' && event.projectId) {
+            setRoomPresence((prev) => ({
+              ...prev,
+              [event.projectId]: Array.isArray(event.users) ? event.users : [],
+            }));
+          } else if (event.type === 'typing:update' && event.projectId && event.userId) {
+            setRoomTyping((prev) => {
+              const current = prev[event.projectId] || [];
+              if (event.isTyping) {
+                if (current.some((u) => u.userId === event.userId)) return prev;
+                return {
+                  ...prev,
+                  [event.projectId]: [...current, { userId: event.userId, userName: event.userName || 'User' }],
+                };
+              } else {
+                return {
+                  ...prev,
+                  [event.projectId]: current.filter((u) => u.userId !== event.userId),
+                };
+              }
+            });
+          }
+        } catch {
+          // Ignore malformed WS payloads
+        }
+      };
+
+      socket.onclose = () => {
+        setWsStatus('offline');
+        if (!isUnmounted) {
+          const delay = Math.min(8000, 1000 * Math.pow(1.5, attempt++));
+          retryTimer = setTimeout(connectWs, delay);
+        }
+      };
+
+      socket.onerror = () => {
+        socket.close();
+      };
+    };
+
+    connectWs();
+
+    return () => {
+      isUnmounted = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (broadcastRef.current) {
+        broadcastRef.current.close();
+      }
+    };
+  }, [mergeIncomingMessages]);
+
+  const joinProjectRoom = useCallback(
+    (projectId: string) => {
+      if (!projectId) return;
+      joinedRoomsRef.current.add(projectId);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'room:join',
+            projectId,
+            userId: currentUser?.id || 'guest',
+            userName: currentUser?.name || 'Portal User',
+            userRole: currentUser?.role || 'client',
+          })
+        );
+      }
+    },
+    [currentUser?.id, currentUser?.name, currentUser?.role]
+  );
+
+  const leaveProjectRoom = useCallback((projectId: string) => {
+    if (!projectId) return;
+    joinedRoomsRef.current.delete(projectId);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'room:leave',
+          projectId,
+        })
+      );
+    }
+  }, []);
+
+  const sendTypingState = useCallback(
+    (projectId: string, isTyping: boolean) => {
+      if (!projectId || wsRef.current?.readyState !== WebSocket.OPEN) return;
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'typing:state',
+          projectId,
+          userId: currentUser?.id || 'guest',
+          userName: currentUser?.name || 'Portal User',
+          isTyping,
+        })
+      );
+    },
+    [currentUser?.id, currentUser?.name]
+  );
+
+  const openProjectChat = useCallback((projectId: string) => {
+    setActiveChatProjectId(projectId);
+  }, []);
 
   const logActivity = (action: string, details: string, category: ActivityLog['category'] = 'system') => {
     const newLog: ActivityLog = {
@@ -272,7 +480,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         email: cleanUser.includes('@') ? cleanUser : `${cleanUser}@freelancerportal.pk`,
         name: username,
         role: 'freelancer',
-        avatarUrl: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
+        avatarUrl: avatarFreelancerProImg,
         status: 'active',
         createdAt: new Date().toISOString(),
         plan: 'free',
@@ -300,7 +508,9 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         email: googleEmail,
         name: googleName,
         role: rolePreference,
-        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatarUrl: rolePreference === 'client'
+          ? avatarClientExecImg
+          : avatarFreelancerProImg,
         company: 'Google Workspace Client',
         status: 'active',
         createdAt: new Date().toISOString(),
@@ -335,7 +545,9 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       email: cleanEmail,
       name: userData.name.trim(),
       role: userData.role,
-      avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+      avatarUrl: userData.role === 'client'
+        ? avatarClientExecImg
+        : avatarFreelancerProImg,
       company: userData.company?.trim(),
       phone: userData.phone?.trim(),
       status: 'active',
@@ -696,21 +908,50 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     projectId: string,
     content: string,
     recipientId: string,
-    recipientName: string
+    recipientName: string,
+    tag: MessageTag = 'general',
+    projectName?: string
   ): Message => {
     const newMsg: Message = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       projectId,
+      projectName,
       senderId: currentUser?.id || 'sys',
       senderName: currentUser?.name || 'Portal User',
       senderRole: currentUser?.role || 'freelancer',
       recipientId,
       recipientName,
       content,
+      tag,
       timestamp: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, newMsg]);
-    logActivity('Message Sent', `Message sent to ${recipientName}`, 'project');
+    setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
+
+    // Broadcast over real-time WebSocket if connected
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'message:send',
+          payload: newMsg,
+        })
+      );
+    } else {
+      // REST fallback
+      fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMsg),
+      }).catch(() => {
+        // Offline / static host mode uses localStorage + BroadcastChannel
+      });
+    }
+
+    // Secondary BroadcastChannel push for multi-tab instant sync
+    if (broadcastRef.current) {
+      broadcastRef.current.postMessage({ type: 'message:created', payload: newMsg });
+    }
+
+    logActivity('Project Message Sent', `Message sent to ${recipientName} in project discussion`, 'project');
     return newMsg;
   };
 
@@ -731,7 +972,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         email: data.email,
         name: data.name,
         role: 'client',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        avatarUrl: avatarClientExecImg,
         phone: data.phone,
         company: data.company,
         status: 'active',
@@ -849,6 +1090,15 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addFile,
         deleteFile,
         sendMessage,
+        activeChatProjectId,
+        setActiveChatProjectId,
+        openProjectChat,
+        wsStatus,
+        roomPresence,
+        roomTyping,
+        joinProjectRoom,
+        leaveProjectRoom,
+        sendTypingState,
         addClient,
         toggleUserStatus,
         upgradePlan,

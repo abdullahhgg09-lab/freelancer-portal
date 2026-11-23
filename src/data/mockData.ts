@@ -8,6 +8,7 @@ import {
   SubscriptionPlan,
   ClientProfile
 } from '../types';
+import { avatarFreelancerProImg } from '../assets/images';
 
 export const ADMIN_CREDENTIALS = {
   username: 'abdary',
@@ -22,7 +23,7 @@ export const INITIAL_USERS: User[] = [
     email: 'abdullahhgg09@gmail.com',
     name: 'ABBDULLAH (Super Admin)',
     role: 'admin',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    avatarUrl: avatarFreelancerProImg,
     phone: '+92 300 1234567',
     company: 'FreelancePort.pk Master HQ',
     status: 'active',

@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { usePortal } from '../context/PortalContext';
+import { avatarFreelancerProImg, avatarClientExecImg } from '../assets/images';
 import {
   User,
   Camera,
@@ -39,16 +40,13 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || '');
 
   const [savedNotification, setSavedNotification] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [customUrlInput, setCustomUrlInput] = useState('');
 
   // Preset avatar choices for quick 1-click selection
   const avatarPresets = [
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+    avatarFreelancerProImg,
+    avatarClientExecImg,
   ];
 
   // Handle local file upload (converts to base64 so it works anywhere without external host!)
@@ -57,9 +55,11 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('Please upload an image smaller than 5MB.');
+      setUploadError('Please upload an image smaller than 5MB.');
+      setTimeout(() => setUploadError(null), 3500);
       return;
     }
+    setUploadError(null);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -107,6 +107,11 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
             <span>Profile and picture updated successfully!</span>
           </div>
         )}
+        {uploadError && (
+          <div className="flex items-center gap-2 text-xs font-bold text-rose-800 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl">
+            <span>{uploadError}</span>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
@@ -130,7 +135,7 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
             {/* Avatar Circle with Upload Trigger */}
             <div className="relative group">
               <img
-                src={avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
+                src={avatarUrl || avatarFreelancerProImg}
                 alt={name}
                 className="w-28 h-28 rounded-3xl object-cover border-4 border-white shadow-xl bg-slate-100"
               />

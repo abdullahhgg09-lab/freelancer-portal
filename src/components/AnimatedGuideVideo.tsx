@@ -85,6 +85,18 @@ export const AnimatedGuideVideo: React.FC<AnimatedGuideVideoProps> = ({ isModal 
     return () => clearInterval(interval);
   }, [isPlaying, steps.length]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isModal && onClose) {
+        onClose();
+      }
+    };
+    if (isModal) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModal, onClose]);
+
   const activeStepData = steps[currentStep];
   const StepIcon = activeStepData.icon;
 
@@ -357,7 +369,12 @@ export const AnimatedGuideVideo: React.FC<AnimatedGuideVideoProps> = ({ isModal 
     return (
       <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md p-3 sm:p-6">
         <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
-          <div className="w-full max-w-4xl my-auto animate-in fade-in zoom-in-95 duration-150">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Platform Architecture Guide Video"
+            className="w-full max-w-4xl my-auto animate-in fade-in zoom-in-95 duration-150"
+          >
             {content}
           </div>
         </div>

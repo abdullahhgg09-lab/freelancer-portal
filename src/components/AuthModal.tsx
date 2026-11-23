@@ -20,6 +20,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
+  // Close modal on Escape key press
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -69,24 +81,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4"
+    >
       <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
         <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
           
           {/* Sticky Header */}
           <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-xs shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-xs shrink-0" aria-hidden="true">
                 <Lock className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h3 className="font-bold text-sm">Portal Authentication</h3>
+                <h3 id="auth-modal-title" className="font-bold text-sm">Portal Authentication</h3>
                 <p className="text-[11px] text-slate-400">Sign in as Freelancer or Client</p>
               </div>
             </div>
             <button
               onClick={onClose}
-              aria-label="Close"
+              aria-label="Close Authentication Modal"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-2"
             >
               <X className="w-5 h-5" />
@@ -96,9 +113,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           <div className="overflow-y-auto">
 
         {/* Tab Selection - Freelancer and Client Only */}
-        <div className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-xs font-semibold">
+        <div role="tablist" aria-label="Choose account role" className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-xs font-semibold">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'freelancer'}
             onClick={() => setActiveTab('freelancer')}
             className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
               activeTab === 'freelancer'
@@ -106,12 +125,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+            <Briefcase className="w-3.5 h-3.5 text-indigo-600" aria-hidden="true" />
             <span>Freelancer</span>
           </button>
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'client'}
             onClick={() => setActiveTab('client')}
             className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
               activeTab === 'client'
@@ -119,7 +140,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <UserCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
             <span>Client</span>
           </button>
         </div>
@@ -135,9 +156,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             className="w-full py-2.5 px-3 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer"
           >
             {isGoogleLoading ? (
-              <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+              <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" aria-hidden="true" />
             ) : (
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -170,10 +191,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
           <form onSubmit={handleSubmit} className="space-y-3 text-xs">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">
+              <label htmlFor="auth-modal-username" className="block font-semibold text-slate-700 mb-1">
                 Username or Email
               </label>
               <input
+                id="auth-modal-username"
                 type="text"
                 required
                 placeholder="Enter username or email"
@@ -184,10 +206,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">
+              <label htmlFor="auth-modal-password" className="block font-semibold text-slate-700 mb-1">
                 Password
               </label>
               <input
+                id="auth-modal-password"
                 type="password"
                 required
                 placeholder="Enter password"
@@ -198,8 +221,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             </div>
 
             {errorMessage && (
-              <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <div role="alert" className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" aria-hidden="true" />
                 <span>{errorMessage}</span>
               </div>
             )}
@@ -213,7 +236,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               }`}
             >
               <span>Sign In as {activeTab === 'freelancer' ? 'Freelancer' : 'Client'}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </form>
 

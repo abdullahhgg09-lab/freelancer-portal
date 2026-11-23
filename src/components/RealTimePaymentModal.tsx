@@ -158,6 +158,18 @@ export const RealTimePaymentModal: React.FC = () => {
     setCompletedRecord(null);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDebitModalOpen) {
+        handleClose();
+      }
+    };
+    if (isDebitModalOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDebitModalOpen]);
+
   const handlePrint = () => {
     window.print();
   };
@@ -165,7 +177,12 @@ export const RealTimePaymentModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4 md:p-6">
       <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
-        <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="realtime-payment-title"
+          className="relative bg-white rounded-2xl sm:rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150"
+        >
           
           {/* Sticky Header with Easy Touch Target Close Button */}
           <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
@@ -175,7 +192,7 @@ export const RealTimePaymentModal: React.FC = () => {
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-sm sm:text-base tracking-tight text-white truncate">
+                  <h3 id="realtime-payment-title" className="font-extrabold text-sm sm:text-base tracking-tight text-white truncate">
                     Real-Time Global Payment Gateway
                   </h3>
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.2 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
@@ -189,8 +206,9 @@ export const RealTimePaymentModal: React.FC = () => {
               </div>
             </div>
             <button
+              type="button"
               onClick={handleClose}
-              aria-label="Close"
+              aria-label="Close Payment Modal"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
             >
               <X className="w-5 h-5" />
@@ -433,8 +451,9 @@ export const RealTimePaymentModal: React.FC = () => {
             {/* Payer Info Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-700 font-medium mb-1">Payer Name / Company:</label>
+                <label htmlFor="payer-name-input" className="block text-slate-700 font-medium mb-1">Payer Name / Company:</label>
                 <input
+                  id="payer-name-input"
                   type="text"
                   required
                   value={payerName}
@@ -445,8 +464,9 @@ export const RealTimePaymentModal: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-slate-700 font-medium mb-1">Receipt Email Address:</label>
+                <label htmlFor="payer-email-input" className="block text-slate-700 font-medium mb-1">Receipt Email Address:</label>
                 <input
+                  id="payer-email-input"
                   type="email"
                   required
                   value={payerEmail}
@@ -461,12 +481,13 @@ export const RealTimePaymentModal: React.FC = () => {
             {paymentChannel !== 'raast' ? (
               <div className="space-y-3 pt-1">
                 <div>
-                  <label className="block text-slate-700 font-medium mb-1 flex items-center justify-between">
+                  <label htmlFor="payer-card-number" className="block text-slate-700 font-medium mb-1 flex items-center justify-between">
                     <span>Card Number (Client's Card):</span>
                     <span className="text-[10px] text-slate-400 font-normal">256-bit SSL Protected</span>
                   </label>
                   <div className="relative">
                     <input
+                      id="payer-card-number"
                       type="text"
                       required
                       value={cardNumber}
@@ -481,8 +502,9 @@ export const RealTimePaymentModal: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-700 font-medium mb-1">Expiry Date:</label>
+                    <label htmlFor="payer-expiry" className="block text-slate-700 font-medium mb-1">Expiry Date:</label>
                     <input
+                      id="payer-expiry"
                       type="text"
                       required
                       maxLength={5}
@@ -494,12 +516,13 @@ export const RealTimePaymentModal: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-slate-700 font-medium mb-1 flex items-center justify-between">
+                    <label htmlFor="payer-cvv" className="block text-slate-700 font-medium mb-1 flex items-center justify-between">
                       <span>CVV / CVC:</span>
                       <span className="text-[9px] text-slate-400">3-4 digits</span>
                     </label>
                     <div className="relative">
                       <input
+                        id="payer-cvv"
                         type="password"
                         required
                         maxLength={4}
