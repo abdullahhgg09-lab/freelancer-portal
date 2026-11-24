@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { usePortal } from '../context/PortalContext';
+import {
+  signInWithGoogleAccounts,
+  signInWithAppleId,
+} from '../services/firebaseAuth';
 import { X, Briefcase, UserCheck, Lock, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
 import { ADMIN_CREDENTIALS } from '../data/mockData';
 import { UserRole } from '../types';
@@ -11,16 +15,15 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccessRole }) => {
-  const { login, loginWithGoogle } = usePortal();
+  const { login, loginWithGoogle, loginWithApple } = usePortal();
 
-  // Public roles: freelancer or client
   const [activeTab, setActiveTab] = useState<'freelancer' | 'client'>('freelancer');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
 
-  // Close modal on Escape key press
   React.useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -38,7 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     e.preventDefault();
     setErrorMessage(null);
 
-    // If entering owner admin credentials
     if (
       username.trim().toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase() &&
       password === ADMIN_CREDENTIALS.password
@@ -60,24 +62,69 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       }
       onClose();
     } else {
-      setErrorMessage(result.message || 'Login failed. Please check credentials or use Google.');
+      setErrorMessage(result.message || 'Login failed. Please check credentials or use Google/Apple.');
     }
   };
 
-  const handleGoogleSignIn = () => {
+  const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
     setErrorMessage(null);
-
-    setTimeout(() => {
-      const res = loginWithGoogle('abdullahhgg09@gmail.com', 'Abdullah', activeTab);
-      setIsGoogleLoading(false);
+    try {
+      const googleResult = await signInWithGoogleAccounts();
+      const res = loginWithGoogle(
+        googleResult.email,
+        googleResult.displayName,
+        activeTab,
+        googleResult.photoURL,
+        true
+      );
       if (res.success && res.user) {
         onSuccessRole(res.user.role);
         onClose();
       } else {
         setErrorMessage('Google Sign In could not be completed.');
       }
-    }, 600);
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setErrorMessage('Google account picker was closed before completing sign-in.');
+      } else {
+        setErrorMessage(err?.message || 'Google Sign In could not be completed.');
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setIsAppleLoading(true);
+    setErrorMessage(null);
+    try {
+      const appleResult = await signInWithAppleId();
+      const res = loginWithApple(
+        appleResult.email,
+        appleResult.displayName,
+        activeTab,
+        appleResult.photoURL
+      );
+      if (res.success && res.user) {
+        onSuccessRole(res.user.role);
+        onClose();
+      } else {
+        setErrorMessage('Apple ID Sign In could not be completed.');
+      }
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setErrorMessage('Apple ID sign-in window was closed.');
+      } else if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
+        setErrorMessage('Enable the Apple provider inside Firebase Console -> Authentication -> Sign-in method first.');
+      } else {
+        setErrorMessage(err?.message || 'Apple ID Sign In could not be completed.');
+      }
+    } finally {
+      setIsAppleLoading(false);
+    }
   };
 
   return (
@@ -89,7 +136,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     >
       <div className="min-h-full flex items-center justify-center py-6 sm:py-8">
         <div className="relative bg-white rounded-2xl sm:rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
-          
           {/* Sticky Header */}
           <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
             <div className="flex items-center gap-2.5">
@@ -102,6 +148,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               </div>
             </div>
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close Authentication Modal"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-2"
@@ -111,140 +158,144 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           </div>
 
           <div className="overflow-y-auto">
+            {/* Tab Selection */}
+            <div role="tablist" aria-label="Choose account role" className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-xs font-semibold">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'freelancer'}
+                onClick={() => setActiveTab('freelancer')}
+                className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                  activeTab === 'freelancer'
+                    ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5 text-indigo-600" aria-hidden="true" />
+                <span>Freelancer</span>
+              </button>
 
-        {/* Tab Selection - Freelancer and Client Only */}
-        <div role="tablist" aria-label="Choose account role" className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-xs font-semibold">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'freelancer'}
-            onClick={() => setActiveTab('freelancer')}
-            className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              activeTab === 'freelancer'
-                ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 font-bold'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Briefcase className="w-3.5 h-3.5 text-indigo-600" aria-hidden="true" />
-            <span>Freelancer</span>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'client'}
-            onClick={() => setActiveTab('client')}
-            className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              activeTab === 'client'
-                ? 'bg-white text-emerald-700 border-b-2 border-emerald-600 font-bold'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-            <span>Client</span>
-          </button>
-        </div>
-
-        {/* Form Body */}
-        <div className="p-6 space-y-4">
-          
-          {/* Google Sign In Button */}
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isGoogleLoading}
-            className="w-full py-2.5 px-3 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer"
-          >
-            {isGoogleLoading ? (
-              <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" aria-hidden="true" />
-            ) : (
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-            )}
-            <span>
-              {isGoogleLoading ? 'Connecting to Google...' : `Continue with Google (${activeTab === 'freelancer' ? 'Freelancer' : 'Client'})`}
-            </span>
-          </button>
-
-          <div className="relative flex items-center justify-center">
-            <div className="border-t border-slate-200 w-full"></div>
-            <span className="bg-white px-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold absolute">
-              or credentials
-            </span>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-            <div>
-              <label htmlFor="auth-modal-username" className="block font-semibold text-slate-700 mb-1">
-                Username or Email
-              </label>
-              <input
-                id="auth-modal-username"
-                type="text"
-                required
-                placeholder="Enter username or email"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium"
-              />
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'client'}
+                onClick={() => setActiveTab('client')}
+                className={`py-3 flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                  activeTab === 'client'
+                    ? 'bg-white text-emerald-700 border-b-2 border-emerald-600 font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                <span>Client</span>
+              </button>
             </div>
 
-            <div>
-              <label htmlFor="auth-modal-password" className="block font-semibold text-slate-700 mb-1">
-                Password
-              </label>
-              <input
-                id="auth-modal-password"
-                type="password"
-                required
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium"
-              />
-            </div>
+            {/* Form Body */}
+            <div className="p-6 space-y-3">
+              {/* Google Sign In Button */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isGoogleLoading || isAppleLoading}
+                className="gsi-material-button w-full py-2.5 px-3 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer"
+              >
+                {isGoogleLoading ? (
+                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" aria-hidden="true" />
+                ) : (
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 48 48" aria-hidden="true">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                  </svg>
+                )}
+                <span>
+                  {isGoogleLoading ? 'Opening Google Accounts...' : `Sign in with Google (${activeTab === 'freelancer' ? 'Freelancer' : 'Client'})`}
+                </span>
+              </button>
 
-            {errorMessage && (
-              <div role="alert" className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" aria-hidden="true" />
-                <span>{errorMessage}</span>
+              {/* Apple Sign In Button */}
+              <button
+                type="button"
+                onClick={handleAppleSignIn}
+                disabled={isGoogleLoading || isAppleLoading}
+                className="w-full py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer"
+              >
+                {isAppleLoading ? (
+                  <Loader2 className="w-4 h-4 text-white animate-spin" aria-hidden="true" />
+                ) : (
+                  <svg className="w-4 h-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+                  </svg>
+                )}
+                <span>
+                  {isAppleLoading ? 'Connecting to Apple ID...' : `Continue with Apple (${activeTab === 'freelancer' ? 'Freelancer' : 'Client'})`}
+                </span>
+              </button>
+
+              <div className="relative flex items-center justify-center pt-1">
+                <div className="border-t border-slate-200 w-full" />
+                <span className="bg-white px-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold absolute">
+                  or credentials
+                </span>
               </div>
-            )}
 
-            <button
-              type="submit"
-              className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
-                activeTab === 'freelancer'
-                  ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
-                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
-              }`}
-            >
-              <span>Sign In as {activeTab === 'freelancer' ? 'Freelancer' : 'Client'}</span>
-              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          </form>
+              <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+                <div>
+                  <label htmlFor="auth-modal-username" className="block font-semibold text-slate-700 mb-1">
+                    Username or Email
+                  </label>
+                  <input
+                    id="auth-modal-username"
+                    type="text"
+                    required
+                    placeholder="Enter username or email"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
 
-          <div className="pt-2 border-t border-slate-100 text-center text-[11px] text-slate-400">
-            Secure encrypted access for FreelancePort.pk
-          </div>
+                <div>
+                  <label htmlFor="auth-modal-password" className="block font-semibold text-slate-700 mb-1">
+                    Password
+                  </label>
+                  <input
+                    id="auth-modal-password"
+                    type="password"
+                    required
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
 
-        </div>
+                {errorMessage && (
+                  <div role="alert" className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" aria-hidden="true" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                    activeTab === 'freelancer'
+                      ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                  }`}
+                >
+                  <span>Sign In as {activeTab === 'freelancer' ? 'Freelancer' : 'Client'}</span>
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </form>
+
+              <div className="pt-2 border-t border-slate-100 text-center text-[11px] text-slate-400">
+                Secure encrypted access for FreelancePort.pk
+              </div>
+            </div>
           </div>
         </div>
       </div>

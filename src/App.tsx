@@ -14,7 +14,8 @@ import { AnimatedGuideVideo } from './components/AnimatedGuideVideo';
 import { RealTimePaymentModal } from './components/RealTimePaymentModal';
 import { LiveDeploymentModal } from './components/LiveDeploymentModal';
 import { ProjectChatDrawer } from './components/ProjectChatRoom';
-import { Layers, ShieldCheck, Database } from 'lucide-react';
+import { GmailConfirmationModal } from './components/GmailConfirmationModal';
+import { Layers, ShieldCheck, Database, FlaskConical, RotateCcw } from 'lucide-react';
 import { UserRole } from './types';
 
 function MainAppContent() {
@@ -26,7 +27,13 @@ function MainAppContent() {
     isGuideVideoOpen,
     setIsGuideVideoOpen,
     openProjectChat,
+    isProductionMode,
+    setIsDeploymentModalOpen,
+    resetSandboxData,
+    projects,
   } = usePortal();
+
+  const [sandboxResetDone, setSandboxResetDone] = useState(false);
 
   const [currentView, setCurrentView] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -36,10 +43,7 @@ function MainAppContent() {
         return viewParam;
       }
     }
-    if (currentUser?.role === 'admin') return 'admin';
-    if (currentUser?.role === 'freelancer') return 'freelancer';
-    if (currentUser?.role === 'client') return 'client';
-    return 'auth';
+    return 'home';
   });
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -53,13 +57,14 @@ function MainAppContent() {
     const projIdParam = params.get('projId');
 
     if (viewParam === 'client') {
-      switchRole('client', clientIdParam || undefined);
+      const linkedProj = projIdParam ? projects.find((p) => p.id === projIdParam) : undefined;
+      switchRole('client', clientIdParam || linkedProj?.clientId || undefined);
       setCurrentView('client');
       if (projIdParam) {
         openProjectChat(projIdParam);
       }
     }
-  }, [switchRole, openProjectChat]);
+  }, [switchRole, openProjectChat, projects]);
 
   const handleAuthSuccess = (role: UserRole) => {
     if (role === 'admin') setCurrentView('admin');
@@ -67,7 +72,13 @@ function MainAppContent() {
     else setCurrentView('client');
   };
 
-  if (!currentUser && currentView === 'auth') {
+  const handleResetSandbox = async () => {
+    await resetSandboxData();
+    setSandboxResetDone(true);
+    setTimeout(() => setSandboxResetDone(false), 3000);
+  };
+
+  if (currentView === 'auth') {
     return (
       <>
         <AuthPage
@@ -88,6 +99,38 @@ function MainAppContent() {
       >
         Skip to main content
       </a>
+
+      {/* Sandbox Testing Environment Bar */}
+      {!isProductionMode && (
+        <div className="bg-amber-50 border-b border-amber-200/80 text-amber-950 text-[11px] font-medium py-1.5 px-4">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="w-3.5 h-3.5 text-amber-700 shrink-0" aria-hidden="true" />
+              <span>
+                <strong>Sandbox Mode Active</strong> · Safe testing environment for project briefs, chat &amp; simulated SBX payments
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetSandbox}
+                className="inline-flex items-center gap-1 font-semibold text-amber-900 hover:text-amber-700 underline underline-offset-2 cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                <span>{sandboxResetDone ? 'Sandbox Reset Done' : 'Reset Test Data'}</span>
+              </button>
+              <span aria-hidden="true" className="text-amber-300">·</span>
+              <button
+                type="button"
+                onClick={() => setIsDeploymentModalOpen(true)}
+                className="font-semibold text-amber-900 hover:text-amber-700 underline underline-offset-2 cursor-pointer"
+              >
+                Environment Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Slim Database Reminder */}
       {!supabaseConfig.isConnected && (
@@ -171,6 +214,7 @@ function MainAppContent() {
 
       <RealTimePaymentModal />
       <LiveDeploymentModal />
+      <GmailConfirmationModal />
 
       {/* Minimal SaaS Footer */}
       <footer className="border-t border-slate-200/80 bg-white py-7 text-xs text-slate-500 mt-auto">

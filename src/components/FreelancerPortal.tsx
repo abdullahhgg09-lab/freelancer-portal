@@ -110,10 +110,16 @@ export const FreelancerPortal: React.FC = () => {
   const freelancerId = currentUser?.id || 'user-free-1';
   const stats = computeFreelancerStats(projects, invoices, freelancerId);
 
-  // Filter items owned by this freelancer
-  const myProjects = projects.filter((p) => p.freelancerId === freelancerId || currentUser?.role === 'admin');
-  const myInvoices = invoices.filter((i) => i.freelancerId === freelancerId || currentUser?.role === 'admin');
-  const myClients = clients.filter((c) => c.freelancerId === freelancerId || currentUser?.role === 'admin');
+  // Filter items owned by this freelancer (also show incoming client brief submissions assigned to master studio 'user-admin')
+  const myProjects = projects.filter(
+    (p) => p.freelancerId === freelancerId || p.freelancerId === 'user-admin' || currentUser?.role === 'admin'
+  );
+  const myInvoices = invoices.filter(
+    (i) => i.freelancerId === freelancerId || i.freelancerId === 'user-admin' || currentUser?.role === 'admin'
+  );
+  const myClients = clients.filter(
+    (c) => c.freelancerId === freelancerId || c.freelancerId === 'user-admin' || currentUser?.role === 'admin'
+  );
   const myFiles = files;
 
   useEffect(() => {

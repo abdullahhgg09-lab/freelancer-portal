@@ -164,9 +164,18 @@ export const AdminPanel: React.FC = () => {
                 <CreditCard className="w-4 h-4 text-indigo-600" />
                 Receiving Debit Card (Virtual Replica)
               </h3>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
-                Live
-              </span>
+              <button
+                type="button"
+                onClick={() => setIsProductionMode(!isProductionMode)}
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase cursor-pointer transition ${
+                  isProductionMode
+                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                    : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                }`}
+                title="Toggle Sandbox vs Live mode"
+              >
+                {isProductionMode ? 'Live' : 'Sandbox Mode'}
+              </button>
             </div>
 
             {/* Realistic Physical Debit Card */}

@@ -251,6 +251,13 @@ async function startServer() {
     res.json({ ok: true, message: msg, duplicate: !added });
   });
 
+  app.post('/api/sandbox/reset', (_req, res) => {
+    storedMessages = [];
+    saveMessagesToDisk();
+    broadcastAll({ type: 'sandbox:reset' });
+    res.json({ ok: true, messageCount: 0 });
+  });
+
   // Vite integration in dev vs static dist in production
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {

@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   Rocket,
-  LogIn
+  LogIn,
+  FlaskConical
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -35,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
     setIsGuideVideoOpen,
     setIsDeploymentModalOpen,
     supabaseConfig,
+    isProductionMode,
   } = usePortal();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -165,12 +167,25 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
             <button
               type="button"
               onClick={() => setIsDeploymentModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/70 text-emerald-800 text-xs font-medium transition cursor-pointer whitespace-nowrap shrink-0"
-              title="Cloud Run Live Public Link"
-              aria-label="View live production deployment status"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer whitespace-nowrap shrink-0 ${
+                isProductionMode
+                  ? 'border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/70 text-emerald-800'
+                  : 'border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-900'
+              }`}
+              title={isProductionMode ? 'Production Live Environment' : 'Sandbox Testing Environment Active'}
+              aria-label="Open sandbox and live environment controls"
             >
-              <Rocket className="w-3 h-3 text-emerald-600" aria-hidden="true" />
-              <span>Live</span>
+              {isProductionMode ? (
+                <>
+                  <Rocket className="w-3 h-3 text-emerald-600" aria-hidden="true" />
+                  <span>Live</span>
+                </>
+              ) : (
+                <>
+                  <FlaskConical className="w-3 h-3 text-amber-700" aria-hidden="true" />
+                  <span>Sandbox</span>
+                </>
+              )}
             </button>
 
             <button
@@ -220,7 +235,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
 
                 <button
                   type="button"
-                  onClick={logout}
+                  onClick={() => {
+                    logout();
+                    setCurrentView('home');
+                  }}
                   title="Sign out"
                   aria-label="Sign out of account"
                   className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
@@ -328,10 +346,23 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
                     setIsDeploymentModalOpen(true);
                     setMobileMenuOpen(false);
                   }}
-                  className="py-2 px-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                  className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer ${
+                    isProductionMode
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-amber-50 border-amber-200 text-amber-900'
+                  }`}
                 >
-                  <Rocket className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Live URL</span>
+                  {isProductionMode ? (
+                    <>
+                      <Rocket className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Live URL</span>
+                    </>
+                  ) : (
+                    <>
+                      <FlaskConical className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Sandbox Mode</span>
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -364,6 +395,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
                     type="button"
                     onClick={() => {
                       logout();
+                      setCurrentView('home');
                       setMobileMenuOpen(false);
                     }}
                     className="py-2 px-3 rounded-lg bg-rose-50 text-rose-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"

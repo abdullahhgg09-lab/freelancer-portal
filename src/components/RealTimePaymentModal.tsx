@@ -48,6 +48,7 @@ export const RealTimePaymentModal: React.FC = () => {
     payoutSettings,
     processRealtimePayment,
     currentUser,
+    isProductionMode,
   } = usePortal();
 
   const isInvoicePayment = Boolean(selectedInvoiceForPayment);
@@ -104,6 +105,32 @@ export const RealTimePaymentModal: React.FC = () => {
   // Handle modal visibility
   const isOpen = isDebitModalOpen || Boolean(selectedInvoiceForPayment);
 
+  const handleClose = () => {
+    setIsDebitModalOpen(false);
+    setSelectedInvoiceForPayment(null);
+    setCompletedRecord(null);
+  };
+
+  useEffect(() => {
+    if (isInvoicePayment && selectedInvoiceForPayment?.currency) {
+      setSelectedCurrency(selectedInvoiceForPayment.currency);
+    }
+  }, [isInvoicePayment, selectedInvoiceForPayment?.currency]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsDebitModalOpen(false);
+        setSelectedInvoiceForPayment(null);
+        setCompletedRecord(null);
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, setIsDebitModalOpen, setSelectedInvoiceForPayment]);
+
   if (!isOpen) return null;
 
   const formatCardNumber = (value: string) => {
@@ -152,24 +179,6 @@ export const RealTimePaymentModal: React.FC = () => {
     }
   };
 
-  const handleClose = () => {
-    setIsDebitModalOpen(false);
-    setSelectedInvoiceForPayment(null);
-    setCompletedRecord(null);
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isDebitModalOpen) {
-        handleClose();
-      }
-    };
-    if (isDebitModalOpen) {
-      window.addEventListener('keydown', handleKeyDown);
-    }
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDebitModalOpen]);
-
   const handlePrint = () => {
     window.print();
   };
@@ -193,11 +202,14 @@ export const RealTimePaymentModal: React.FC = () => {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 id="realtime-payment-title" className="font-extrabold text-sm sm:text-base tracking-tight text-white truncate">
-                    Real-Time Global Payment Gateway
+                    {isProductionMode ? 'Real-Time Global Payment Gateway' : 'Sandbox Payment Test Gateway'}
                   </h3>
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.2 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Live
+                  <span className={`text-[10px] px-2 py-0.2 rounded-md font-bold uppercase tracking-wider shrink-0 ${
+                    isProductionMode
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                  }`}>
+                    {isProductionMode ? 'Live' : 'Sandbox Test'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 truncate">
@@ -302,6 +314,11 @@ export const RealTimePaymentModal: React.FC = () => {
         ) : (
           /* Payment Form Screen */
           <form onSubmit={handlePay} className="p-6 sm:p-7 space-y-5 text-xs">
+            {!isProductionMode && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium">
+                <strong>Sandbox Simulation Active:</strong> Koi real bank charge nahi hoga. Pre-filled test card (<code className="font-mono">4242 8821 9910 5532</code>) use karke safe transaction test karein.
+              </div>
+            )}
             
             {/* Bill Summary Banner */}
             <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-50 to-slate-50 border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -584,7 +601,8 @@ export const RealTimePaymentModal: React.FC = () => {
                 <>
                   <Lock className="w-4 h-4" />
                   <span>
-                    Pay &amp; Remit {activeCurrencyObj.symbol} {convertedAmount.toLocaleString()} {selectedCurrency}
+                    {isProductionMode ? 'Pay & Remit' : 'Simulate Sandbox Payment'}{' '}
+                    {activeCurrencyObj.symbol} {convertedAmount.toLocaleString()} {selectedCurrency}
                   </span>
                   <ArrowRight className="w-4 h-4 ml-1" />
                 </>

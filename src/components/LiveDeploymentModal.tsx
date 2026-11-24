@@ -10,9 +10,8 @@ import {
   Server,
   ShieldCheck,
   CheckCircle2,
-  Terminal,
-  HelpCircle,
-  Share2
+  FlaskConical,
+  RotateCcw
 } from 'lucide-react';
 
 export const LiveDeploymentModal: React.FC = () => {
@@ -21,10 +20,13 @@ export const LiveDeploymentModal: React.FC = () => {
     setIsDeploymentModalOpen,
     isProductionMode,
     setIsProductionMode,
+    resetSandboxData,
   } = usePortal();
 
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedDevLink, setCopiedDevLink] = useState(false);
   const [copiedHtaccess, setCopiedHtaccess] = useState(false);
+  const [sandboxCleared, setSandboxCleared] = useState(false);
   const [activeTab, setActiveTab] = useState<'infinity-redirect' | 'infinity-upload' | 'custom-domain'>('infinity-redirect');
 
   React.useEffect(() => {
@@ -67,8 +69,20 @@ export const LiveDeploymentModal: React.FC = () => {
     setTimeout(() => setCopiedHtaccess(false), 2500);
   };
 
+  const handleCopyDev = () => {
+    navigator.clipboard.writeText(devUrl);
+    setCopiedDevLink(true);
+    setTimeout(() => setCopiedDevLink(false), 2500);
+  };
+
   const handleOpenLive = () => {
-    window.open(liveSharedUrl, '_blank', 'noopener,noreferrer');
+    window.open(isProductionMode ? liveSharedUrl : devUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleResetSandbox = async () => {
+    await resetSandboxData();
+    setSandboxCleared(true);
+    setTimeout(() => setSandboxCleared(false), 3000);
   };
 
   return (
@@ -80,32 +94,33 @@ export const LiveDeploymentModal: React.FC = () => {
           aria-labelledby="deployment-modal-title"
           className="relative bg-white rounded-2xl sm:rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150"
         >
-          
-          {/* Sticky Header with Easy Touch Target Close Button */}
-          <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+          {/* Sticky Header */}
+          <div className="sticky top-0 z-30 px-5 sm:px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 flex items-center justify-center font-bold shrink-0">
-                <Rocket className="w-5 h-5" />
+              <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                isProductionMode
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-400/30'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-400/30'
+              }`}>
+                {isProductionMode ? <Rocket className="w-5 h-5" /> : <FlaskConical className="w-5 h-5" />}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 id="deployment-modal-title" className="font-extrabold text-sm sm:text-base tracking-tight text-white truncate">
-                    Live Production &amp; Sandbox Exit Hub
+                  <h3 id="deployment-modal-title" className="font-display font-bold text-sm sm:text-base tracking-tight text-white truncate">
+                    {isProductionMode ? 'Live Production Environment' : 'Sandbox Testing Environment'}
                   </h3>
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.2 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Worldwide Live
-                  </span>
                 </div>
                 <p className="text-xs text-slate-300 truncate">
-                  Aapka project sandbox se bahar live cloud par active hai
+                  {isProductionMode
+                    ? 'Live cloud mode active for client access'
+                    : 'Isolated sandbox mode active — safe testing without live charges'}
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setIsDeploymentModalOpen(false)}
-              aria-label="Close Live Deployment Modal"
+              aria-label="Close Environment Modal"
               className="p-2 rounded-xl text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition cursor-pointer shrink-0 ml-3"
             >
               <X className="w-5 h-5" />
@@ -114,100 +129,144 @@ export const LiveDeploymentModal: React.FC = () => {
 
           {/* Modal Body */}
           <div className="overflow-y-auto p-5 sm:p-8 space-y-6 text-xs">
-          
-          {/* Status Box */}
-          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="font-extrabold text-sm text-emerald-950">
-                Aapki Website Puri Dunya Mein Live Hai!
-              </h4>
-              <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Yeh app Google Cloud Run par worldwide live host ho chuki hai. Koi bhi client Pakistan, USA, UK, UAE ya dunya ke kisi bhi konay se baghair kisi sandbox ya developer tool ke directly is public link par click kar ke website open kar sakta hai!
-              </p>
+            {/* Environment Status Box */}
+            <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+              isProductionMode
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border-amber-200 text-amber-950'
+            }`}>
+              {isProductionMode ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <FlaskConical className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-1">
+                <h4 className="font-display font-bold text-sm">
+                  {isProductionMode
+                    ? 'Aapki Website Production Live Mode Mein Hai'
+                    : 'Aapki Website Ab Sandbox Mode Mein Hai!'}
+                </h4>
+                <p className="text-[11px] leading-relaxed opacity-90">
+                  {isProductionMode
+                    ? 'Clients live URL par ja kar projects, real-time chat aur payouts use kar sakte hain.'
+                    : 'Sandbox mode mein aap client briefs, project chat rooms aur simulated debit card payments (SBX-* reference) bilkul safely test kar sakte hain aur ek click par test data reset kar sakte hain.'}
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Public Live URL Card */}
-          <div className="space-y-2">
-            <label className="block text-slate-700 font-bold text-xs flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Globe className="w-4 h-4 text-emerald-600" />
-                Official Public Live Link (Share with Clients):
-              </span>
-              <span className="text-[10px] text-slate-400 font-normal">Cloud Run Global Edge</span>
-            </label>
+            {/* Sandbox URL + Public URL */}
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-slate-700 font-bold text-xs flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FlaskConical className="w-4 h-4 text-amber-600" />
+                    Development Sandbox URL (Safe Testing):
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">Isolated Dev Container</span>
+                </label>
 
-            <div className="flex items-center gap-2">
-              <div className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50 font-mono text-[11px] text-slate-800 truncate select-all">
-                {liveSharedUrl}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50 font-mono text-[11px] text-slate-800 truncate select-all">
+                    {devUrl}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyDev}
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center gap-1.5 transition shrink-0 cursor-pointer"
+                  >
+                    {copiedDevLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedDevLink ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center gap-1.5 transition shrink-0 shadow-xs"
-                title="Copy live link"
-              >
-                {copiedLink ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-slate-300" />
-                    <span>Copy Link</span>
-                  </>
-                )}
-              </button>
+              <div className="space-y-1.5">
+                <label className="block text-slate-700 font-bold text-xs flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-emerald-600" />
+                    Shared Public URL (For Clients):
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">Cloud Run Global Edge</span>
+                </label>
 
-              <button
-                type="button"
-                onClick={handleOpenLive}
-                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition shrink-0 shadow-xs"
-                title="Open live website in a new window"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open Live</span>
-              </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50 font-mono text-[11px] text-slate-800 truncate select-all">
+                    {liveSharedUrl}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center gap-1.5 transition shrink-0 cursor-pointer"
+                    title="Copy public link"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-300" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenLive}
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center gap-1.5 transition shrink-0 cursor-pointer"
+                    title="Open in a new window"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Environment Mode Switcher */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-4">
-            <div>
-              <div className="font-bold text-slate-900 text-xs flex items-center gap-2">
-                <span>Active Environment Mode:</span>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+            {/* Environment Mode Switcher & Sandbox Reset */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="font-bold text-slate-900 text-xs flex items-center gap-2">
+                  <span>Active Environment Mode:</span>
+                  <span className={`font-semibold ${isProductionMode ? 'text-emerald-700' : 'text-amber-800'}`}>
+                    {isProductionMode ? 'Production Live' : 'Development Sandbox'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {isProductionMode
+                    ? 'Live transactions active (TXN-*) for production clients.'
+                    : 'Sandbox transactions active (SBX-*) with safe test card & reset button.'}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {!isProductionMode && (
+                  <button
+                    type="button"
+                    onClick={handleResetSandbox}
+                    className="px-3 py-1.5 rounded-xl font-semibold text-xs border border-amber-300 bg-amber-100 hover:bg-amber-200 text-amber-900 flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{sandboxCleared ? 'Reset Done!' : 'Reset Test Data'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsProductionMode(!isProductionMode)}
+                  className={`px-3.5 py-1.5 rounded-xl font-semibold text-xs transition border cursor-pointer ${
                     isProductionMode
-                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                      : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
                   }`}
                 >
-                  {isProductionMode ? '🚀 Production Live Mode' : '🧪 Development Sandbox Mode'}
-                </span>
+                  {isProductionMode ? 'Enter Sandbox Mode' : 'Switch to Live Mode'}
+                </button>
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {isProductionMode
-                  ? 'Falto test banners band hain, real-time live payment aur public access active hai.'
-                  : 'Testing aur debugging ke liye sandbox markers on hain.'}
-              </p>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setIsProductionMode(!isProductionMode)}
-              className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition border ${
-                isProductionMode
-                  ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                  : 'bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300'
-              }`}
-            >
-              {isProductionMode ? 'Switch to Test Mode' : 'Switch to Live Mode'}
-            </button>
-          </div>
 
           {/* InfinityFree & Custom Domain Integration Hub */}
           <div className="border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4 bg-white shadow-xs">

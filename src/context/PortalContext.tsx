@@ -31,6 +31,18 @@ import {
   INITIAL_REALTIME_TRANSACTIONS
 } from '../data/mockData';
 import { getSupabaseClient, testSupabaseConnection } from '../lib/supabase';
+import {
+  initFirebaseAuthListener,
+  signOutFirebaseAuth,
+  getInMemoryAccessToken,
+} from '../services/firebaseAuth';
+
+export interface PendingGmailConfirm {
+  email: string;
+  name: string;
+  role: UserRole;
+  signedInAt: string;
+}
 
 interface PortalContextType {
   currentUser: User | null;
@@ -75,7 +87,21 @@ interface PortalContextType {
     cardNumberMasked?: string;
   }) => Promise<{ success: boolean; transactionRef: string; record: RealtimePaymentRecord; message: string }>;
   login: (username: string, password?: string, role?: UserRole) => { success: boolean; message?: string };
-  loginWithGoogle: (email?: string, name?: string, rolePreference?: UserRole) => { success: boolean; user?: User };
+  loginWithGoogle: (
+    email?: string,
+    name?: string,
+    rolePreference?: UserRole,
+    avatarUrl?: string | null,
+    triggerGmailConfirm?: boolean
+  ) => { success: boolean; user?: User };
+  loginWithApple: (
+    email?: string,
+    name?: string,
+    rolePreference?: UserRole,
+    avatarUrl?: string | null
+  ) => { success: boolean; user?: User };
+  pendingGmailConfirm: PendingGmailConfirm | null;
+  setPendingGmailConfirm: (info: PendingGmailConfirm | null) => void;
   registerUser: (userData: { name: string; email: string; username: string; role: UserRole; company?: string; phone?: string }) => { success: boolean; message?: string };
   updateUserProfile: (data: Partial<User>) => void;
   processProPlanPayment: (paymentData: { planId: SubscriptionPlanId; cardholderName: string; cardNumber: string; expiry: string; cvv: string; bankName: string }) => Promise<{ success: boolean; transactionRef: string; message: string; amount: number }>;
@@ -111,6 +137,7 @@ interface PortalContextType {
   upgradePlan: (plan: SubscriptionPlanId) => void;
   saveSupabaseConfig: (url: string, key: string) => Promise<{ success: boolean; message: string }>;
   resetDemoData: () => void;
+  resetSandboxData: () => Promise<void>;
 }
 
 const PortalContext = createContext<PortalContextType | undefined>(undefined);
@@ -129,7 +156,7 @@ const STORAGE_KEYS = {
   SUPABASE_KEY: 'portal_supabase_key',
   PAYOUT_SETTINGS: 'fcp_payout_settings',
   REALTIME_TXS: 'fcp_realtime_transactions',
-  PRODUCTION_MODE: 'fcp_production_mode',
+  PRODUCTION_MODE: 'fcp_env_mode_v2',
 };
 
 function loadStored<T>(key: string, fallback: T): T {
@@ -204,19 +231,29 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [realtimeTransactions, setRealtimeTransactions] = useState<RealtimePaymentRecord[]>(() =>
     loadStored(STORAGE_KEYS.REALTIME_TXS, INITIAL_REALTIME_TRANSACTIONS)
   );
-  const [isProductionMode, setIsProductionMode] = useState<boolean>(() =>
-    loadStored(STORAGE_KEYS.PRODUCTION_MODE, true)
+  const [isProductionMode, setIsProductionModeState] = useState<boolean>(() =>
+    loadStored(STORAGE_KEYS.PRODUCTION_MODE, false)
   );
   const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
   const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<Invoice | null>(null);
   const [activeChatProjectId, setActiveChatProjectId] = useState<string | null>(null);
+  const [pendingGmailConfirm, setPendingGmailConfirm] = useState<PendingGmailConfirm | null>(null);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'offline'>('connecting');
   const [roomPresence, setRoomPresence] = useState<Record<string, RoomParticipant[]>>({});
   const [roomTyping, setRoomTyping] = useState<Record<string, TypingParticipant[]>>({});
 
+  useEffect(() => {
+    const unsubscribe = initFirebaseAuthListener();
+    return () => unsubscribe();
+  }, []);
+
   const wsRef = useRef<WebSocket | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
+  const currentUserRef = useRef<User | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => {
     const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
@@ -256,6 +293,27 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
     });
   }, []);
+
+  // Cross-tab synchronization so Client and Freelancer open in two tabs share created projects/invoices/files immediately
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleStorage = (e: StorageEvent) => {
+      if (!e.newValue) return;
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (e.key === STORAGE_KEYS.PROJECTS && Array.isArray(parsed)) setProjects(parsed);
+        else if (e.key === STORAGE_KEYS.CLIENTS && Array.isArray(parsed)) setClients(parsed);
+        else if (e.key === STORAGE_KEYS.INVOICES && Array.isArray(parsed)) setInvoices(parsed);
+        else if (e.key === STORAGE_KEYS.FILES && Array.isArray(parsed)) setFiles(parsed);
+        else if (e.key === STORAGE_KEYS.USERS && Array.isArray(parsed)) setUsers(parsed);
+        else if (e.key === STORAGE_KEYS.MESSAGES && Array.isArray(parsed)) mergeIncomingMessages(parsed);
+      } catch {
+        // ignore invalid JSON
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [mergeIncomingMessages]);
 
   // Real-time WebSocket + BroadcastChannel connection
   useEffect(() => {
@@ -298,15 +356,16 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       socket.onopen = () => {
         attempt = 0;
         setWsStatus('connected');
-        // Re-join any active rooms
+        // Re-join any active rooms using latest currentUserRef
+        const activeUser = currentUserRef.current;
         for (const roomId of joinedRoomsRef.current) {
           socket.send(
             JSON.stringify({
               type: 'room:join',
               projectId: roomId,
-              userId: currentUser?.id || 'guest',
-              userName: currentUser?.name || 'Portal User',
-              userRole: currentUser?.role || 'client',
+              userId: activeUser?.id || 'guest',
+              userName: activeUser?.name || 'Portal User',
+              userRole: activeUser?.role || 'client',
             })
           );
         }
@@ -340,6 +399,8 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 };
               }
             });
+          } else if (event.type === 'sandbox:reset') {
+            setMessages([]);
           }
         } catch {
           // Ignore malformed WS payloads
@@ -494,24 +555,85 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return { success: false, message: 'User not found. Use Demo Quick Login or register below.' };
   };
 
-  const loginWithGoogle = (emailParam?: string, nameParam?: string, rolePreference: UserRole = 'freelancer'): { success: boolean; user?: User } => {
+  const loginWithGoogle = (
+    emailParam?: string,
+    nameParam?: string,
+    rolePreference: UserRole = 'freelancer',
+    avatarUrlParam?: string | null,
+    triggerGmailConfirm: boolean = true
+  ): { success: boolean; user?: User } => {
     const googleEmail = (emailParam || 'abdullahhgg09@gmail.com').trim().toLowerCase();
-    const googleName = nameParam || (googleEmail.includes('abdullah') ? 'Abdullah (Google User)' : 'Google Partner User');
+    const googleName = nameParam || (googleEmail.includes('abdullah') ? 'Abdullah' : googleEmail.split('@')[0]);
 
-    // Check if existing user with this email
-    let matchedUser = users.find((u) => u.email.toLowerCase() === googleEmail);
+    // Match user with exact email and requested role so users can log in cleanly as Freelancer or Client
+    let matchedUser = users.find(
+      (u) => u.email.toLowerCase() === googleEmail && u.role === rolePreference
+    );
 
     if (!matchedUser) {
       matchedUser = {
         id: `user-g-${Date.now()}`,
-        username: googleEmail.split('@')[0].replace(/[^a-z0-9_]/g, '_') || 'google_user',
+        username: `${googleEmail.split('@')[0].replace(/[^a-z0-9_]/g, '_') || 'google_user'}_${rolePreference === 'client' ? 'c' : 'f'}`,
         email: googleEmail,
         name: googleName,
         role: rolePreference,
-        avatarUrl: rolePreference === 'client'
-          ? avatarClientExecImg
-          : avatarFreelancerProImg,
-        company: 'Google Workspace Client',
+        avatarUrl:
+          avatarUrlParam ||
+          (rolePreference === 'client' ? avatarClientExecImg : avatarFreelancerProImg),
+        company: rolePreference === 'client' ? 'Client Workspace' : 'FreelancePort Studio',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        plan: 'starter',
+      };
+      setUsers((prev) => [...prev, matchedUser!]);
+    } else if (avatarUrlParam && matchedUser.avatarUrl !== avatarUrlParam) {
+      matchedUser = { ...matchedUser, avatarUrl: avatarUrlParam };
+      setUsers((prev) => prev.map((u) => (u.id === matchedUser!.id ? matchedUser! : u)));
+    }
+
+    if (matchedUser.status === 'suspended') {
+      return { success: false };
+    }
+
+    setCurrentUser(matchedUser);
+    logActivity('Google Sign In', `${matchedUser.name} authenticated via Google Account (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
+
+    if (triggerGmailConfirm && getInMemoryAccessToken()) {
+      setPendingGmailConfirm({
+        email: matchedUser.email,
+        name: matchedUser.name,
+        role: matchedUser.role,
+        signedInAt: new Date().toISOString(),
+      });
+    }
+
+    return { success: true, user: matchedUser };
+  };
+
+  const loginWithApple = (
+    emailParam?: string,
+    nameParam?: string,
+    rolePreference: UserRole = 'freelancer',
+    avatarUrlParam?: string | null
+  ): { success: boolean; user?: User } => {
+    const appleEmail = (emailParam || `apple_${Date.now()}@privaterelay.appleid.com`).trim().toLowerCase();
+    const appleName = nameParam || 'Apple ID User';
+
+    let matchedUser = users.find(
+      (u) => u.email.toLowerCase() === appleEmail && u.role === rolePreference
+    );
+
+    if (!matchedUser) {
+      matchedUser = {
+        id: `user-a-${Date.now()}`,
+        username: `apple_${appleEmail.split('@')[0].replace(/[^a-z0-9_]/g, '_')}`,
+        email: appleEmail,
+        name: appleName,
+        role: rolePreference,
+        avatarUrl:
+          avatarUrlParam ||
+          (rolePreference === 'client' ? avatarClientExecImg : avatarFreelancerProImg),
+        company: rolePreference === 'client' ? 'Client Workspace' : 'Apple Studio Partner',
         status: 'active',
         createdAt: new Date().toISOString(),
         plan: 'starter',
@@ -524,7 +646,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     setCurrentUser(matchedUser);
-    logActivity('Google Sign In', `${matchedUser.name} authenticated via Google Account (${matchedUser.email})`, 'auth');
+    logActivity('Apple ID Sign In', `${matchedUser.name} authenticated via Apple ID (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
     return { success: true, user: matchedUser };
   };
 
@@ -662,6 +784,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     AUD: 182,
   };
 
+  const setIsProductionMode = useCallback((isProd: boolean) => {
+    setIsProductionModeState(isProd);
+    setPayoutSettings((prev) => ({
+      ...prev,
+      gatewayMode: isProd ? 'live' : 'sandbox',
+    }));
+  }, []);
+
   const processRealtimePayment = async (data: {
     amount: number;
     currency: string;
@@ -677,7 +807,8 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }): Promise<{ success: boolean; transactionRef: string; record: RealtimePaymentRecord; message: string }> => {
     const rate = EXCHANGE_RATES_TO_PKR[data.currency.toUpperCase()] || 1;
     const amountPkr = Math.round(data.amount * rate);
-    const txnRef = `TXN-${data.paymentChannel.toUpperCase()}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const refPrefix = isProductionMode ? 'TXN' : 'SBX';
+    const txnRef = `${refPrefix}-${data.paymentChannel.toUpperCase()}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     // Simulate real-time secure settlement delay
     await new Promise((res) => setTimeout(res, 850));
@@ -789,10 +920,12 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (currentUser) {
       logActivity('User Logged Out', `${currentUser.name} signed out`, 'auth');
     }
+    setPendingGmailConfirm(null);
     setCurrentUser(null);
+    void signOutFirebaseAuth();
   };
 
-  const switchRole = (role: UserRole, targetId?: string) => {
+  const switchRole = useCallback((role: UserRole, targetId?: string) => {
     if (role === 'admin') {
       const adminUser = users.find((u) => u.role === 'admin') || INITIAL_USERS[0];
       setCurrentUser(adminUser);
@@ -807,14 +940,59 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         logActivity('Role Switched', `Switched session to ${target.name} (${target.role})`, 'auth');
         return;
       }
+
+      // Also support immediate switching right after addClient/addProject in the same render tick
+      const clientRec = clients.find((c) => c.userId === targetId);
+      const projRec = projects.find((p) => p.clientId === targetId);
+      const synthesizedUser: User = {
+        id: targetId,
+        username: (clientRec?.name || projRec?.clientName || 'client_user').toLowerCase().replace(/[^a-z0-9]/g, '_'),
+        email: clientRec?.email || 'client@portal.pk',
+        name: clientRec?.name || projRec?.clientName || 'Client Partner',
+        role,
+        avatarUrl: role === 'client' ? avatarClientExecImg : avatarFreelancerProImg,
+        company: clientRec?.company || 'Client Workspace',
+        phone: clientRec?.phone,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      };
+      setUsers((prev) => (prev.some((u) => u.id === targetId) ? prev : [...prev, synthesizedUser]));
+      setCurrentUser(synthesizedUser);
+      logActivity('Role Switched', `Switched session to ${synthesizedUser.name} (${synthesizedUser.role})`, 'auth');
+      return;
     }
 
-    const match = users.find((u) => u.role === role);
+    // Prefer a user matching the requested role (if client, prefer one owning an active project)
+    const match =
+      role === 'client'
+        ? users.find((u) => u.role === 'client' && projects.some((p) => p.clientId === u.id)) ||
+          users.find((u) => u.role === 'client')
+        : users.find((u) => u.role === role);
+
     if (match) {
       setCurrentUser(match);
       logActivity('Role Switched', `Switched session to ${match.name} (${match.role})`, 'auth');
+      return;
     }
-  };
+
+    // Synthesize a clean workspace account for Sandbox/Demo switching if none exists yet
+    const fallbackProjectClient = role === 'client' ? projects[0] : undefined;
+    const newRoleUser: User = {
+      id: role === 'freelancer' ? 'user-free-studio' : (fallbackProjectClient?.clientId || 'user-client-sandbox'),
+      username: role === 'freelancer' ? 'studio_freelancer' : 'sandbox_client',
+      email: role === 'freelancer' ? 'freelancer@freelanceport.pk' : 'client@freelanceport.pk',
+      name: role === 'freelancer' ? 'Studio Freelancer' : (fallbackProjectClient?.clientName || 'Sandbox Client'),
+      role,
+      avatarUrl: role === 'client' ? avatarClientExecImg : avatarFreelancerProImg,
+      company: role === 'freelancer' ? 'FreelancePort Studio' : 'Client Workspace',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      plan: role === 'freelancer' ? 'pro' : undefined,
+    };
+    setUsers((prev) => (prev.some((u) => u.id === newRoleUser.id) ? prev : [...prev, newRoleUser]));
+    setCurrentUser(newRoleUser);
+    logActivity('Role Switched', `Initialized ${newRoleUser.name} (${role}) workspace session`, 'auth');
+  }, [users, clients, projects]);
 
   const addProject = (data: Omit<Project, 'id' | 'createdAt'>): Project => {
     const newProject: Project = {
@@ -963,11 +1141,13 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     setClients((prev) => [newClient, ...prev]);
 
-    // Also create matching client user record if not present
-    const existingUser = users.find((u) => u.email.toLowerCase() === data.email.toLowerCase());
+    // Also create matching client user record with exact same userId as data.userId
+    const existingUser = users.find(
+      (u) => u.id === data.userId || u.email.toLowerCase() === data.email.toLowerCase()
+    );
     if (!existingUser) {
       const newClientUser: User = {
-        id: `user-${Date.now()}`,
+        id: data.userId,
         username: data.name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'client_' + Date.now(),
         email: data.email,
         name: data.name,
@@ -1042,6 +1222,32 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     logActivity('Production Reset', 'Clean production state initialized', 'system');
   };
 
+  const resetSandboxData = async () => {
+    setProjects(INITIAL_PROJECTS);
+    setClients(INITIAL_CLIENTS);
+    setInvoices(INITIAL_INVOICES);
+    setFiles(INITIAL_FILES);
+    setMessages(INITIAL_MESSAGES);
+    setRealtimeTransactions(INITIAL_REALTIME_TRANSACTIONS);
+    setActivityLogs([
+      {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        userId: currentUser?.id || 'sys',
+        userName: currentUser?.name || 'System',
+        userRole: currentUser?.role || 'admin',
+        action: 'Sandbox Environment Reset',
+        details: 'Cleared test projects, invoices, chat history, and simulated transactions while keeping bank payout config intact.',
+        category: 'system',
+      },
+    ]);
+    try {
+      await fetch('/api/sandbox/reset', { method: 'POST' });
+    } catch {
+      // ignore if offline
+    }
+  };
+
   return (
     <PortalContext.Provider
       value={{
@@ -1076,6 +1282,9 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         processRealtimePayment,
         login,
         loginWithGoogle,
+        loginWithApple,
+        pendingGmailConfirm,
+        setPendingGmailConfirm,
         registerUser,
         updateUserProfile,
         processProPlanPayment,
@@ -1104,6 +1313,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         upgradePlan,
         saveSupabaseConfig,
         resetDemoData,
+        resetSandboxData,
       }}
     >
       {children}

@@ -14,7 +14,8 @@ import {
   X,
   Copy,
   Check,
-  Wifi
+  Wifi,
+  LogIn
 } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '../data/mockData';
 
@@ -23,8 +24,9 @@ interface LandingPageProps {
   setCurrentView: (view: string) => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ setCurrentView }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, setCurrentView }) => {
   const {
+    currentUser,
     switchRole,
     currency,
     setIsGuideVideoOpen,
@@ -178,6 +180,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setCurrentView }) => {
                   <UserCheck className="w-4 h-4 text-emerald-600" aria-hidden="true" />
                   <span>Client Portal</span>
                 </button>
+
+                {!currentUser && (
+                  <button
+                    type="button"
+                    onClick={onOpenAuth}
+                    className="px-4 py-3.5 rounded-xl bg-white border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/60 text-indigo-700 font-semibold text-xs sm:text-sm transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" aria-hidden="true" />
+                    <span>Sign In (Google / Apple)</span>
+                  </button>
+                )}
               </div>
 
               {/* Clean Unboxed Trust Metadata */}
