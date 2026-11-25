@@ -20,7 +20,6 @@ import {
   Loader2,
   Mail
 } from 'lucide-react';
-import { ADMIN_CREDENTIALS } from '../data/mockData';
 import { UserRole } from '../types';
 
 interface AuthPageProps {
@@ -29,7 +28,14 @@ interface AuthPageProps {
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }) => {
-  const { login, loginWithGoogle, loginWithApple, registerUser } = usePortal();
+  const {
+    login,
+    loginAdmin,
+    claimAdminPassword,
+    loginWithGoogle,
+    loginWithApple,
+    registerUser,
+  } = usePortal();
 
   const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
   const [selectedRole, setSelectedRole] = useState<'freelancer' | 'client'>('freelancer');
@@ -51,6 +57,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [needsAdminClaim, setNeedsAdminClaim] = useState(false);
 
   // Real Multi-Account Google OAuth Sign-In (shows ALL Google accounts via prompt=select_account)
   const handleGoogleLogin = async () => {
@@ -72,12 +80,26 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
       }
     } catch (err: any) {
       const code = err?.code || '';
+      const rawMessage = String(err?.message || '');
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setErrorMessage('Google sign-in popup was closed before selecting an account. Please try again.');
       } else if (code === 'auth/popup-blocked') {
         setErrorMessage('Browser popup was blocked. Please allow popups for this site to choose your Google account.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setErrorMessage(
+          `Domain "${window.location.hostname}" is not authorized yet. Add it in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
+      } else if (
+        code === 'auth/operation-not-allowed' ||
+        code === 'auth/admin-restricted-operation' ||
+        rawMessage.toLowerCase().includes('verification') ||
+        rawMessage.toLowerCase().includes('testing')
+      ) {
+        setErrorMessage(
+          'Google OAuth is still in Testing mode on project quaint-osprey-0v9wh. Open Google Cloud Console -> Google Auth Platform -> Audience and click "Publish App" (or add the email under Test users).'
+        );
       } else {
-        setErrorMessage(err?.message || 'Unable to complete Google sign-in. Please try again.');
+        setErrorMessage(rawMessage || 'Unable to complete Google sign-in. Please try again.');
       }
     } finally {
       setIsGoogleLoading(false);
@@ -120,28 +142,46 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
   };
 
   // Sign In Form Handler
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    const cleanInput = usernameInput.trim().toLowerCase();
 
-    if (
-      usernameInput.trim().toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase() &&
-      passwordInput === ADMIN_CREDENTIALS.password
-    ) {
-      const result = login(usernameInput, passwordInput, 'admin');
-      if (result.success) {
-        onSuccess('admin');
-        return;
+    // Admin authentication goes strictly through server-side verification
+    if (cleanInput === 'abdullahhgg09@gmail.com') {
+      setIsSubmitting(true);
+      try {
+        if (needsAdminClaim) {
+          const claimRes = await claimAdminPassword(cleanInput, passwordInput);
+          if (claimRes.success) {
+            setNeedsAdminClaim(false);
+            onSuccess('admin');
+          } else {
+            setErrorMessage(claimRes.message || 'Unable to set admin password.');
+          }
+          return;
+        }
+
+        const adminRes = await loginAdmin(cleanInput, passwordInput);
+        if (adminRes.success) {
+          onSuccess('admin');
+        } else if (adminRes.needsClaim) {
+          setNeedsAdminClaim(true);
+          setErrorMessage(
+            'First-time Admin setup: Submit again with your chosen Admin password (min 8 characters) to lock and activate Admin access.'
+          );
+        } else {
+          setErrorMessage(adminRes.message || 'Invalid admin email or password.');
+        }
+      } finally {
+        setIsSubmitting(false);
       }
+      return;
     }
 
     const result = login(usernameInput, passwordInput, selectedRole);
     if (result.success) {
-      if (usernameInput.trim().toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase()) {
-        onSuccess('admin');
-      } else {
-        onSuccess(selectedRole);
-      }
+      onSuccess(selectedRole);
     } else {
       setErrorMessage(result.message || 'Invalid credentials. Please verify your username and password.');
     }
@@ -171,12 +211,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
     } else {
       setErrorMessage(res.message || 'Registration failed.');
     }
-  };
-
-  const handleAdminAccess = () => {
-    setUsernameInput(ADMIN_CREDENTIALS.username);
-    setPasswordInput(ADMIN_CREDENTIALS.password);
-    setErrorMessage(null);
   };
 
   return (
@@ -427,13 +461,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
 
                 <button
                   type="submit"
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                  disabled={isSubmitting}
+                  className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer ${
                     selectedRole === 'freelancer'
                       ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
                       : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
                   }`}
                 >
-                  <span>Sign In as {selectedRole === 'freelancer' ? 'Freelancer' : 'Client'}</span>
+                  <span>
+                    {isSubmitting
+                      ? 'Verifying...'
+                      : needsAdminClaim
+                      ? 'Set Password & Open Admin Panel'
+                      : `Sign In as ${selectedRole === 'freelancer' ? 'Freelancer' : 'Client'}`}
+                  </span>
                   <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </form>
@@ -540,14 +581,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
               <span>Protected by Role-Based Encryption</span>
             </span>
-            <button
-              type="button"
-              onClick={handleAdminAccess}
-              className="text-slate-400 hover:text-slate-600 text-[10px] underline cursor-pointer"
-              title="Super Admin Credentials Gateway"
-            >
-              Executive Login
-            </button>
           </div>
         </div>
       </div>

@@ -5,7 +5,6 @@ import {
   signInWithAppleId,
 } from '../services/firebaseAuth';
 import { X, Briefcase, UserCheck, Lock, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
-import { ADMIN_CREDENTIALS } from '../data/mockData';
 import { UserRole } from '../types';
 
 interface AuthModalProps {
@@ -15,7 +14,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccessRole }) => {
-  const { login, loginWithGoogle, loginWithApple } = usePortal();
+  const { login, loginAdmin, claimAdminPassword, loginWithGoogle, loginWithApple } = usePortal();
 
   const [activeTab, setActiveTab] = useState<'freelancer' | 'client'>('freelancer');
   const [username, setUsername] = useState('');
@@ -23,6 +22,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [needsAdminClaim, setNeedsAdminClaim] = useState(false);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -37,29 +38,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    const cleanInput = username.trim().toLowerCase();
 
-    if (
-      username.trim().toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase() &&
-      password === ADMIN_CREDENTIALS.password
-    ) {
-      const result = login(username, password, 'admin');
-      if (result.success) {
-        onSuccessRole('admin');
-        onClose();
-        return;
+    if (cleanInput === 'abdullahhgg09@gmail.com') {
+      setIsSubmitting(true);
+      try {
+        if (needsAdminClaim) {
+          const claimRes = await claimAdminPassword(cleanInput, password);
+          if (claimRes.success) {
+            setNeedsAdminClaim(false);
+            onSuccessRole('admin');
+            onClose();
+          } else {
+            setErrorMessage(claimRes.message || 'Unable to set admin password.');
+          }
+          return;
+        }
+
+        const adminRes = await loginAdmin(cleanInput, password);
+        if (adminRes.success) {
+          onSuccessRole('admin');
+          onClose();
+        } else if (adminRes.needsClaim) {
+          setNeedsAdminClaim(true);
+          setErrorMessage(
+            'First-time Admin setup: Submit again with your chosen Admin password (min 8 chars) to activate Admin Panel.'
+          );
+        } else {
+          setErrorMessage(adminRes.message || 'Invalid admin email or password.');
+        }
+      } finally {
+        setIsSubmitting(false);
       }
+      return;
     }
 
     const result = login(username, password, activeTab);
     if (result.success) {
-      if (username.trim().toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase()) {
-        onSuccessRole('admin');
-      } else {
-        onSuccessRole(activeTab);
-      }
+      onSuccessRole(activeTab);
       onClose();
     } else {
       setErrorMessage(result.message || 'Login failed. Please check credentials or use Google/Apple.');
@@ -86,10 +105,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       }
     } catch (err: any) {
       const code = err?.code || '';
+      const rawMessage = String(err?.message || '');
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setErrorMessage('Google account picker was closed before completing sign-in.');
+      } else if (code === 'auth/popup-blocked') {
+        setErrorMessage('Browser popup was blocked. Please allow popups for this site to sign in with Google.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setErrorMessage(
+          `Domain "${window.location.hostname}" needs to be added in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
+      } else if (
+        code === 'auth/operation-not-allowed' ||
+        code === 'auth/admin-restricted-operation' ||
+        rawMessage.toLowerCase().includes('verification') ||
+        rawMessage.toLowerCase().includes('testing')
+      ) {
+        setErrorMessage(
+          'Google OAuth is still in Testing mode on project quaint-osprey-0v9wh. Open Google Cloud Console -> Google Auth Platform -> Audience and click "Publish App" (or add the account under Test users).'
+        );
       } else {
-        setErrorMessage(err?.message || 'Google Sign In could not be completed.');
+        setErrorMessage(rawMessage || 'Google Sign In could not be completed.');
       }
     } finally {
       setIsGoogleLoading(false);
@@ -281,13 +316,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
                 <button
                   type="submit"
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                  disabled={isSubmitting}
+                  className={`w-full py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer ${
                     activeTab === 'freelancer'
                       ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
                       : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
                   }`}
                 >
-                  <span>Sign In as {activeTab === 'freelancer' ? 'Freelancer' : 'Client'}</span>
+                  <span>
+                    {isSubmitting
+                      ? 'Verifying...'
+                      : needsAdminClaim
+                      ? 'Set Password & Open Admin Panel'
+                      : `Sign In as ${activeTab === 'freelancer' ? 'Freelancer' : 'Client'}`}
+                  </span>
                   <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </form>

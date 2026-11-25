@@ -10,12 +10,7 @@ import {
 } from '../types';
 import { avatarFreelancerProImg } from '../assets/images';
 
-export const ADMIN_CREDENTIALS = {
-  username: 'abdary',
-  password: 'abdary123!@#',
-};
-
-// Clean production setup: Only Super Admin, no mock users
+// Clean production setup: Only Super Admin metadata placeholder (credentials verified server-side only)
 export const INITIAL_USERS: User[] = [
   {
     id: 'user-admin',

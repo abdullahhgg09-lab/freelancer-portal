@@ -26,7 +26,6 @@ import {
   INITIAL_FILES,
   INITIAL_MESSAGES,
   INITIAL_ACTIVITY_LOGS,
-  ADMIN_CREDENTIALS,
   INITIAL_PAYOUT_SETTINGS,
   INITIAL_REALTIME_TRANSACTIONS
 } from '../data/mockData';
@@ -34,7 +33,6 @@ import { getSupabaseClient, testSupabaseConnection } from '../lib/supabase';
 import {
   initFirebaseAuthListener,
   signOutFirebaseAuth,
-  getInMemoryAccessToken,
 } from '../services/firebaseAuth';
 
 export interface PendingGmailConfirm {
@@ -87,6 +85,15 @@ interface PortalContextType {
     cardNumberMasked?: string;
   }) => Promise<{ success: boolean; transactionRef: string; record: RealtimePaymentRecord; message: string }>;
   login: (username: string, password?: string, role?: UserRole) => { success: boolean; message?: string };
+  loginAdmin: (
+    email: string,
+    password: string
+  ) => Promise<{ success: boolean; needsClaim?: boolean; message?: string }>;
+  claimAdminPassword: (
+    email: string,
+    password: string
+  ) => Promise<{ success: boolean; message?: string }>;
+  isAdminAuthenticated: boolean;
   loginWithGoogle: (
     email?: string,
     name?: string,
@@ -202,7 +209,8 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const stored = loadStored<User | null>(STORAGE_KEYS.CURRENT_USER, null);
     if (
       stored &&
-      (stored.id === 'user-free-1' ||
+      (stored.role === 'admin' ||
+        stored.id === 'user-free-1' ||
         stored.id === 'user-client-1' ||
         stored.username === 'hamza_dev' ||
         stored.username === 'sarah_technova')
@@ -212,6 +220,8 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
     return stored;
   });
+  const [adminToken, setAdminToken] = useState<string | null>(null);
+  const isAdminAuthenticated = Boolean(adminToken && currentUser?.role === 'admin');
   const [projects, setProjects] = useState<Project[]>(() => loadStored(STORAGE_KEYS.PROJECTS, INITIAL_PROJECTS));
   const [clients, setClients] = useState<ClientProfile[]>(() => loadStored(STORAGE_KEYS.CLIENTS, INITIAL_CLIENTS));
   const [invoices, setInvoices] = useState<Invoice[]>(() => loadStored(STORAGE_KEYS.INVOICES, INITIAL_INVOICES));
@@ -268,9 +278,15 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   });
 
-  // Sync state to localStorage
+  // Sync state to localStorage (never persist admin sessions to localStorage)
   useEffect(() => saveStored(STORAGE_KEYS.USERS, users), [users]);
-  useEffect(() => saveStored(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      return;
+    }
+    saveStored(STORAGE_KEYS.CURRENT_USER, currentUser);
+  }, [currentUser]);
   useEffect(() => saveStored(STORAGE_KEYS.PROJECTS, projects), [projects]);
   useEffect(() => saveStored(STORAGE_KEYS.CLIENTS, clients), [clients]);
   useEffect(() => saveStored(STORAGE_KEYS.INVOICES, invoices), [invoices]);
@@ -505,29 +521,86 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     logActivity('Currency Changed', `Switched active display currency to ${c}`, 'system');
   };
 
-  const login = (username: string, password?: string, rolePreference?: UserRole): { success: boolean; message?: string } => {
+  const loginAdmin = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; needsClaim?: boolean; message?: string }> => {
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok || !data?.token) {
+        return {
+          success: false,
+          needsClaim: Boolean(data?.needsClaim),
+          message: data?.message || 'Invalid admin email or password.',
+        };
+      }
+
+      const adminUser: User = {
+        ...(users.find((u) => u.id === 'user-admin') || INITIAL_USERS[0]),
+        email: data.admin?.email || email.trim().toLowerCase(),
+        role: 'admin',
+      };
+      setAdminToken(data.token);
+      setCurrentUser(adminUser);
+      logActivity('Admin Logged In', `Verified Admin (${adminUser.email}) authenticated`, 'auth');
+      return { success: true };
+    } catch {
+      return { success: false, message: 'Unable to reach authentication server.' };
+    }
+  };
+
+  const claimAdminPassword = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const res = await fetch('/api/admin/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok || !data?.token) {
+        return {
+          success: false,
+          message: data?.message || 'Unable to set admin password.',
+        };
+      }
+
+      const adminUser: User = {
+        ...(users.find((u) => u.id === 'user-admin') || INITIAL_USERS[0]),
+        email: data.admin?.email || email.trim().toLowerCase(),
+        role: 'admin',
+      };
+      setAdminToken(data.token);
+      setCurrentUser(adminUser);
+      logActivity('Admin Credentials Claimed', `Verified Admin (${adminUser.email}) configured and signed in`, 'auth');
+      return { success: true };
+    } catch {
+      return { success: false, message: 'Unable to reach authentication server.' };
+    }
+  };
+
+  const login = (username: string, _password?: string, rolePreference?: UserRole): { success: boolean; message?: string } => {
     const cleanUser = username.trim().toLowerCase();
 
-    // Check exact Admin credentials specified by user: abdary / abdary123!@#
-    if (cleanUser === ADMIN_CREDENTIALS.username.toLowerCase()) {
-      if (password && password !== ADMIN_CREDENTIALS.password) {
-        return { success: false, message: 'Invalid Admin Password. Expected: abdary123!@#' };
-      }
-      const adminUser = users.find((u) => u.username === 'abdary') || INITIAL_USERS[0];
-      setCurrentUser(adminUser);
-      logActivity('Admin Logged In', 'Super Admin (abdary) authenticated to control center', 'auth');
-      return { success: true };
-    }
-
-    // Match by username or email
+    // Match non-admin accounts by username or email
     const found = users.find(
-      (u) => u.username.toLowerCase() === cleanUser || u.email.toLowerCase() === cleanUser
+      (u) =>
+        u.role !== 'admin' &&
+        (u.username.toLowerCase() === cleanUser || u.email.toLowerCase() === cleanUser)
     );
 
     if (found) {
       if (found.status === 'suspended') {
         return { success: false, message: 'This account has been suspended by the platform administrator.' };
       }
+      setAdminToken(null);
       setCurrentUser(found);
       logActivity('User Logged In', `${found.name} (${found.role}) authenticated`, 'auth');
       return { success: true };
@@ -598,7 +671,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentUser(matchedUser);
     logActivity('Google Sign In', `${matchedUser.name} authenticated via Google Account (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
 
-    if (triggerGmailConfirm && getInMemoryAccessToken()) {
+    if (triggerGmailConfirm && matchedUser.email) {
       setPendingGmailConfirm({
         email: matchedUser.email,
         name: matchedUser.name,
@@ -921,15 +994,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       logActivity('User Logged Out', `${currentUser.name} signed out`, 'auth');
     }
     setPendingGmailConfirm(null);
+    setAdminToken(null);
     setCurrentUser(null);
     void signOutFirebaseAuth();
   };
 
   const switchRole = useCallback((role: UserRole, targetId?: string) => {
     if (role === 'admin') {
-      const adminUser = users.find((u) => u.role === 'admin') || INITIAL_USERS[0];
-      setCurrentUser(adminUser);
-      logActivity('Role Switched', 'Switched session to Super Admin (abdary)', 'auth');
+      // Never allow unauthenticated role-switching into Admin Panel
       return;
     }
 
@@ -1281,6 +1353,9 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsProductionMode,
         processRealtimePayment,
         login,
+        loginAdmin,
+        claimAdminPassword,
+        isAdminAuthenticated,
         loginWithGoogle,
         loginWithApple,
         pendingGmailConfirm,

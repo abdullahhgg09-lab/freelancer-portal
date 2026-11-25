@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePortal } from '../context/PortalContext';
-import { sendLoginConfirmationEmail } from '../services/firebaseAuth';
+import { sendServerLoginConfirmationEmail } from '../services/firebaseAuth';
 import { Mail, CheckCircle2, X, Loader2, AlertCircle, Send } from 'lucide-react';
 
 export const GmailConfirmationModal: React.FC = () => {
   const { pendingGmailConfirm, setPendingGmailConfirm } = usePortal();
   const [isSending, setIsSending] = useState(false);
   const [sentMessageId, setSentMessageId] = useState<string | null>(null);
+  const [deliveredVia, setDeliveredVia] = useState<'smtp' | 'in_app' | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setSentMessageId(null);
+    setDeliveredVia(null);
     setErrorMsg(null);
     setIsSending(false);
   }, [pendingGmailConfirm?.email, pendingGmailConfirm?.signedInAt]);
@@ -32,7 +34,7 @@ export const GmailConfirmationModal: React.FC = () => {
     setIsSending(true);
     setErrorMsg(null);
     try {
-      const result = await sendLoginConfirmationEmail({
+      const result = await sendServerLoginConfirmationEmail({
         toEmail: pendingGmailConfirm.email,
         userName: pendingGmailConfirm.name,
         role: pendingGmailConfirm.role,
@@ -40,10 +42,11 @@ export const GmailConfirmationModal: React.FC = () => {
         signedInAt: pendingGmailConfirm.signedInAt,
       });
       setSentMessageId(result.messageId);
+      setDeliveredVia(result.deliveredVia);
     } catch (err: any) {
       setErrorMsg(
         err?.message ||
-          'Unable to send confirmation email right now. Please make sure Gmail permission was granted.'
+          'Unable to process login confirmation right now. Please try again.'
       );
     } finally {
       setIsSending(false);
@@ -78,7 +81,7 @@ export const GmailConfirmationModal: React.FC = () => {
                       Gmail Login Confirmation
                     </h3>
                     <p className="text-[11px] text-slate-300">
-                      Confirm sending receipt to your inbox
+                      Confirm sending receipt for your sign-in
                     </p>
                   </div>
                 </div>
@@ -99,16 +102,26 @@ export const GmailConfirmationModal: React.FC = () => {
                     <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
                       <CheckCircle2 className="w-7 h-7" aria-hidden="true" />
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <h4 className="font-display font-bold text-base text-slate-900">
-                        Confirmation Sent to Gmail!
+                        {deliveredVia === 'smtp'
+                          ? `Confirmation Email Sent to ${pendingGmailConfirm.email}!`
+                          : `Sign-In Confirmed for ${pendingGmailConfirm.email}!`}
                       </h4>
                       <p className="text-slate-600 leading-relaxed">
-                        Aap ke Gmail inbox (<strong className="text-slate-900">{pendingGmailConfirm.email}</strong>) par login confirmation message bhej diya gaya hai.
+                        {deliveredVia === 'smtp' ? (
+                          <>
+                            Aap ke Gmail inbox (<strong className="text-slate-900">{pendingGmailConfirm.email}</strong>) par login confirmation email bhej diya gaya hai.
+                          </>
+                        ) : (
+                          <>
+                            Aap ka workspace sign-in confirmation receipt generate aur verify ho gaya hai. Live inbox email delivery ke liye Settings &rarr; Secrets mein <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-[10px]">SMTP_USER</code> aur <code className="px-1 py-0.5 rounded bg-slate-100 font-mono text-[10px]">SMTP_PASS</code> add karein.
+                          </>
+                        )}
                       </p>
                     </div>
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-mono text-slate-500">
-                      Gmail Reference ID: {sentMessageId}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-mono text-slate-600">
+                      Confirmation Reference: {sentMessageId}
                     </div>
                     <button
                       type="button"
@@ -183,7 +196,7 @@ export const GmailConfirmationModal: React.FC = () => {
                         ) : (
                           <>
                             <Send className="w-4 h-4" aria-hidden="true" />
-                            <span>Confirm &amp; Send to Gmail</span>
+                            <span>Confirm &amp; Send</span>
                           </>
                         )}
                       </button>

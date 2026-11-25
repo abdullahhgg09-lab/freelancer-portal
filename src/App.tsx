@@ -15,7 +15,7 @@ import { RealTimePaymentModal } from './components/RealTimePaymentModal';
 import { LiveDeploymentModal } from './components/LiveDeploymentModal';
 import { ProjectChatDrawer } from './components/ProjectChatRoom';
 import { GmailConfirmationModal } from './components/GmailConfirmationModal';
-import { Layers, ShieldCheck, Database, FlaskConical, RotateCcw } from 'lucide-react';
+import { Layers, Database, FlaskConical, RotateCcw } from 'lucide-react';
 import { UserRole } from './types';
 
 function MainAppContent() {
@@ -31,6 +31,7 @@ function MainAppContent() {
     setIsDeploymentModalOpen,
     resetSandboxData,
     projects,
+    isAdminAuthenticated,
   } = usePortal();
 
   const [sandboxResetDone, setSandboxResetDone] = useState(false);
@@ -39,7 +40,7 @@ function MainAppContent() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const viewParam = params.get('view');
-      if (viewParam === 'client' || viewParam === 'freelancer' || viewParam === 'home' || viewParam === 'admin') {
+      if (viewParam === 'client' || viewParam === 'freelancer' || viewParam === 'home') {
         return viewParam;
       }
     }
@@ -100,8 +101,8 @@ function MainAppContent() {
         Skip to main content
       </a>
 
-      {/* Sandbox Testing Environment Bar */}
-      {!isProductionMode && (
+      {/* Sandbox Testing Environment Bar (workspace views only) */}
+      {currentView !== 'home' && !isProductionMode && (
         <div className="bg-amber-50 border-b border-amber-200/80 text-amber-950 text-[11px] font-medium py-1.5 px-4">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -132,8 +133,8 @@ function MainAppContent() {
         </div>
       )}
 
-      {/* Slim Database Reminder */}
-      {!supabaseConfig.isConnected && (
+      {/* Slim Database Reminder (workspace views only) */}
+      {currentView !== 'home' && !supabaseConfig.isConnected && (
         <div className="bg-slate-900 text-slate-200 text-[11px] font-medium py-1.5 px-4 text-center flex items-center justify-center gap-2 border-b border-slate-800">
           <span>Supabase Database optional sync ready</span>
           <span aria-hidden="true">·</span>
@@ -176,7 +177,13 @@ function MainAppContent() {
               />
             )}
 
-            {currentView === 'admin' && <AdminPanel />}
+            {currentView === 'admin' && isAdminAuthenticated && <AdminPanel />}
+            {currentView === 'admin' && !isAdminAuthenticated && (
+              <LandingPage
+                onOpenAuth={() => setCurrentView('auth')}
+                setCurrentView={setCurrentView}
+              />
+            )}
 
             {currentView === 'freelancer' && <FreelancerPortal />}
 
@@ -185,7 +192,7 @@ function MainAppContent() {
             {currentView === 'profile' && (
               <UserProfilePage
                 onBack={() => {
-                  if (currentUser?.role === 'admin') setCurrentView('admin');
+                  if (currentUser?.role === 'admin' && isAdminAuthenticated) setCurrentView('admin');
                   else if (currentUser?.role === 'client') setCurrentView('client');
                   else setCurrentView('freelancer');
                 }}
@@ -228,28 +235,18 @@ function MainAppContent() {
             <span>Client Portal, Project Chat &amp; Remittance Architecture</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => setIsSupabaseGuideOpen(true)}
-              className="hover:text-indigo-600 transition flex items-center gap-1.5 font-medium cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-              <span>Supabase Setup</span>
-            </button>
-            <span aria-hidden="true">·</span>
-            <button
-              type="button"
-              onClick={() => {
-                switchRole('admin');
-                setCurrentView('admin');
-              }}
-              className="hover:text-slate-900 transition flex items-center gap-1.5 font-medium cursor-pointer"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-slate-600" aria-hidden="true" />
-              <span>Owner Bank Console</span>
-            </button>
-          </div>
+          {currentView !== 'home' && (
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsSupabaseGuideOpen(true)}
+                className="hover:text-indigo-600 transition flex items-center gap-1.5 font-medium cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                <span>Supabase Setup</span>
+              </button>
+            </div>
+          )}
         </div>
       </footer>
     </div>
