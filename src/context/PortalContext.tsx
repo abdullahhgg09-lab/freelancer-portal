@@ -603,6 +603,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setAdminToken(null);
       setCurrentUser(found);
       logActivity('User Logged In', `${found.name} (${found.role}) authenticated`, 'auth');
+      if (found.email && found.email.includes('@')) {
+        setPendingGmailConfirm({
+          email: found.email,
+          name: found.name,
+          role: found.role,
+          signedInAt: new Date().toISOString(),
+        });
+      }
       return { success: true };
     }
 
@@ -622,6 +630,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setUsers((prev) => [...prev, newUser]);
       setCurrentUser(newUser);
       logActivity('Freelancer Registered', `New freelancer registered: ${newUser.name}`, 'auth');
+      if (newUser.email && newUser.email.includes('@')) {
+        setPendingGmailConfirm({
+          email: newUser.email,
+          name: newUser.name,
+          role: newUser.role,
+          signedInAt: new Date().toISOString(),
+        });
+      }
       return { success: true };
     }
 
@@ -720,6 +736,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setCurrentUser(matchedUser);
     logActivity('Apple ID Sign In', `${matchedUser.name} authenticated via Apple ID (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
+    if (matchedUser.email) {
+      setPendingGmailConfirm({
+        email: matchedUser.email,
+        name: matchedUser.name,
+        role: matchedUser.role,
+        signedInAt: new Date().toISOString(),
+      });
+    }
     return { success: true, user: matchedUser };
   };
 
@@ -753,6 +777,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setUsers((prev) => [...prev, newUser]);
     setCurrentUser(newUser);
     logActivity('User Registered', `New ${userData.role} registered: ${newUser.name} (${newUser.email})`, 'auth');
+    if (newUser.email && newUser.email.includes('@')) {
+      setPendingGmailConfirm({
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        signedInAt: new Date().toISOString(),
+      });
+    }
     return { success: true };
   };
 
