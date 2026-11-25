@@ -129,6 +129,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onBrowseLanding }
         setErrorMessage('Apple ID sign-in window was closed before completing login.');
       } else if (code === 'auth/popup-blocked') {
         setErrorMessage('Browser popup was blocked. Please allow popups for this site to sign in with Apple ID.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setErrorMessage(
+          `Domain "${window.location.hostname}" is not authorized yet. Add it in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
       } else if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
         setErrorMessage(
           'Apple ID Sign-In requires enabling the Apple provider (with your Apple Developer Services ID) inside Firebase Console -> Authentication -> Sign-in method.'

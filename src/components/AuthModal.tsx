@@ -152,6 +152,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       const code = err?.code || '';
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         setErrorMessage('Apple ID sign-in window was closed.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setErrorMessage(
+          `Domain "${window.location.hostname}" needs to be added in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
       } else if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
         setErrorMessage('Enable the Apple provider inside Firebase Console -> Authentication -> Sign-in method first.');
       } else {
