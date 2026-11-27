@@ -6,6 +6,8 @@ export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
 
 export type SubscriptionPlanId = 'free' | 'starter' | 'pro' | 'business';
 
+export type FreelancerAvailability = 'available' | 'busy' | 'unavailable';
+
 export interface User {
   id: string;
   username: string;
@@ -17,9 +19,31 @@ export interface User {
   company?: string;
   bio?: string;
   address?: string;
+  headline?: string;
+  category?: string;
+  skills?: string[];
+  hourlyRatePkr?: number;
+  availability?: FreelancerAvailability;
+  isListedInDirectory?: boolean;
   status: 'active' | 'suspended';
   createdAt: string;
   plan?: SubscriptionPlanId;
+}
+
+export interface FreelancerProfileSummary {
+  id: string;
+  name: string;
+  username: string;
+  avatarUrl?: string;
+  company?: string;
+  bio?: string;
+  address?: string;
+  headline: string;
+  category: string;
+  skills: string[];
+  hourlyRatePkr: number;
+  availability: FreelancerAvailability;
+  completedProjectsCount: number;
 }
 
 export interface DebitCardPayment {
@@ -121,9 +145,29 @@ export interface ProjectFile {
 }
 
 export type MessageTag = 'general' | 'milestone' | 'revision' | 'deliverable' | 'payment';
+export type ChatMessageType = MessageTag | 'text' | 'file' | 'system';
+
+export interface Conversation {
+  conversationId: string;
+  clientId: string;
+  freelancerId: string;
+  projectId: string;
+  projectName?: string;
+  clientName?: string;
+  freelancerName?: string;
+  clientAvatar?: string;
+  freelancerAvatar?: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  unreadCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface Message {
+  messageId: string;
   id: string;
+  conversationId: string;
   projectId: string;
   projectName?: string;
   senderId: string;
@@ -131,8 +175,13 @@ export interface Message {
   senderRole: UserRole;
   recipientId: string;
   recipientName: string;
+  message: string;
   content: string;
+  messageType: ChatMessageType;
   tag?: MessageTag;
+  isRead: boolean;
+  readAt?: string;
+  createdAt: string;
   timestamp: string;
   attachments?: string[];
 }
@@ -146,6 +195,17 @@ export interface RoomParticipant {
 export interface TypingParticipant {
   userId: string;
   userName: string;
+}
+
+export interface ChatNotification {
+  id: string;
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  senderId: string;
+  senderName: string;
+  message: string;
+  createdAt: string;
 }
 
 export interface ActivityLog {

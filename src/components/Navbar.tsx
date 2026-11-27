@@ -47,6 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, currentView, setCurr
 
   const navItems: Array<{ id: string; label: string; role?: UserRole }> = [
     { id: 'home', label: 'Overview' },
+    { id: 'freelancers', label: 'Find Freelancers' },
     { id: 'freelancer', label: 'Freelancer', role: 'freelancer' },
     { id: 'client', label: 'Client Portal', role: 'client' },
     ...(isAdminAuthenticated ? [{ id: 'admin', label: 'Admin Panel', role: 'admin' as UserRole }] : []),

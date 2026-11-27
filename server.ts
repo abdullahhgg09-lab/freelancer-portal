@@ -4,43 +4,39 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
-import { WebSocketServer, WebSocket } from 'ws';
+import { Server as SocketIOServer } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
-
-interface ChatMessage {
-  id: string;
-  projectId: string;
-  projectName?: string;
-  senderId: string;
-  senderName: string;
-  senderRole: 'admin' | 'freelancer' | 'client';
-  recipientId: string;
-  recipientName: string;
-  content: string;
-  tag?: 'general' | 'revision' | 'milestone' | 'deliverable' | 'payment';
-  timestamp: string;
-}
-
-interface RoomParticipant {
-  userId: string;
-  userName: string;
-  userRole: string;
-}
-
-interface ClientSession {
-  ws: WebSocket;
-  rooms: Set<string>;
-  user?: RoomParticipant;
-}
+import {
+  SESSION_SECRET,
+  VerifiedChatUser,
+  createChatToken,
+  verifyChatToken,
+  checkMessageRateLimit,
+  sanitizeId,
+  validateMessageContent,
+} from './server/chatAuth.ts';
+import {
+  loadChatStore,
+  isUserParticipant,
+  upsertConversation,
+  getConversationById,
+  getConversationByProjectAndUser,
+  getEnrichedUserConversations,
+  getMessagesForConversation,
+  addMessageToStore,
+  markConversationMessagesRead,
+  clearChatStoreForSandbox,
+  getStoreStats,
+  type StoredMessage,
+} from './server/chatStore.ts';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.resolve(process.cwd(), '.data');
-const CHAT_STORE_PATH = path.join(DATA_DIR, 'portal-messages.json');
 const ADMIN_AUTH_PATH = path.join(DATA_DIR, 'admin-auth.json');
+const FREELANCERS_STORE_PATH = path.join(DATA_DIR, 'freelancers.json');
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'abdullahhgg09@gmail.com').trim().toLowerCase();
 const ENV_ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim();
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 interface StoredAdminAuth {
   email: string;
@@ -110,227 +106,581 @@ function verifyAdminToken(token: string | undefined): { email: string; role: str
   }
 }
 
-// Server-authoritative message store
-let storedMessages: ChatMessage[] = [];
+interface PublicFreelancerRecord {
+  id: string;
+  name: string;
+  username: string;
+  avatarUrl?: string;
+  company?: string;
+  bio?: string;
+  address?: string;
+  headline: string;
+  category: string;
+  skills: string[];
+  hourlyRatePkr: number;
+  availability: 'available' | 'busy' | 'unavailable';
+  isListedInDirectory: boolean;
+  updatedAt: string;
+}
 
-function loadMessagesFromDisk(): void {
+let storedFreelancers: PublicFreelancerRecord[] = [];
+
+function loadFreelancersFromDisk(): void {
   try {
-    if (fs.existsSync(CHAT_STORE_PATH)) {
-      const raw = fs.readFileSync(CHAT_STORE_PATH, 'utf-8');
+    if (fs.existsSync(FREELANCERS_STORE_PATH)) {
+      const raw = fs.readFileSync(FREELANCERS_STORE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        storedMessages = parsed;
+        storedFreelancers = parsed;
       }
     }
   } catch (err) {
-    console.error('Failed to load stored messages:', err);
+    console.error('Failed to load freelancers directory:', err);
   }
 }
 
-function saveMessagesToDisk(): void {
+function saveFreelancersToDisk(): void {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFile(CHAT_STORE_PATH, JSON.stringify(storedMessages, null, 2), (err) => {
-      if (err) console.error('Failed to persist messages:', err);
+    fs.writeFile(FREELANCERS_STORE_PATH, JSON.stringify(storedFreelancers, null, 2), (err) => {
+      if (err) console.error('Failed to persist freelancers:', err);
     });
   } catch (err) {
-    console.error('Failed to initialize chat storage dir:', err);
+    console.error('Failed to initialize freelancers dir:', err);
   }
 }
 
-function upsertMessage(msg: ChatMessage): boolean {
-  if (!msg || !msg.id || !msg.projectId || !msg.content) return false;
-  if (storedMessages.some((m) => m.id === msg.id)) {
-    return false; // Idempotent duplicate protection
-  }
-  storedMessages.push(msg);
-  if (storedMessages.length > 2000) {
-    storedMessages = storedMessages.slice(-2000);
-  }
-  saveMessagesToDisk();
-  return true;
-}
+const VALID_MESSAGE_TYPES = new Set([
+  'general',
+  'milestone',
+  'revision',
+  'deliverable',
+  'payment',
+  'text',
+  'file',
+  'system',
+]);
 
 async function startServer() {
-  loadMessagesFromDisk();
+  loadChatStore();
   loadAdminAuthFromDisk();
+  loadFreelancersFromDisk();
 
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
-  const sessions = new Map<WebSocket, ClientSession>();
-
-  function getRoomParticipants(projectId: string): RoomParticipant[] {
-    const map = new Map<string, RoomParticipant>();
-    for (const session of sessions.values()) {
-      if (session.rooms.has(projectId) && session.user) {
-        map.set(session.user.userId, session.user);
-      }
-    }
-    return Array.from(map.values());
-  }
-
-  function broadcastToRoom(projectId: string, payload: unknown, excludeWs?: WebSocket) {
-    const raw = JSON.stringify(payload);
-    for (const [clientWs, session] of sessions.entries()) {
-      if (clientWs !== excludeWs && clientWs.readyState === WebSocket.OPEN) {
-        if (session.rooms.has(projectId) || session.rooms.has('*')) {
-          clientWs.send(raw);
+  const io = new SocketIOServer(server, {
+    cors: {
+      origin: (origin, callback) => {
+        // Allow same-origin, local dev, and deployed portal domains safely
+        if (!origin) return callback(null, true);
+        if (
+          origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://127.0.0.1:') ||
+          origin.startsWith('https://')
+        ) {
+          return callback(null, true);
         }
-      }
-    }
+        return callback(new Error('Origin not allowed'));
+      },
+      methods: ['GET', 'POST'],
+    },
+  });
+
+  // Track active socket IDs per authenticated userId for accurate online/offline presence
+  const onlineSocketsByUser = new Map<string, Set<string>>();
+
+  function getOnlineUserIds(): string[] {
+    return Array.from(onlineSocketsByUser.keys());
   }
 
-  function broadcastAll(payload: unknown, excludeWs?: WebSocket) {
-    const raw = JSON.stringify(payload);
-    for (const [clientWs] of sessions.entries()) {
-      if (clientWs !== excludeWs && clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(raw);
-      }
+  // Authenticate every Socket.IO connection via handshake auth token
+  io.use((socket, next) => {
+    const rawAuthToken =
+      typeof socket.handshake.auth?.token === 'string'
+        ? socket.handshake.auth.token
+        : typeof socket.handshake.headers?.authorization === 'string' &&
+          socket.handshake.headers.authorization.startsWith('Bearer ')
+        ? socket.handshake.headers.authorization.slice(7).trim()
+        : '';
+
+    const verified = verifyChatToken(rawAuthToken);
+    if (!verified) {
+      return next(new Error('Unauthorized: invalid or missing chat authentication token'));
     }
-  }
 
-  wss.on('connection', (ws) => {
-    const session: ClientSession = { ws, rooms: new Set(['*']) };
-    sessions.set(ws, session);
+    socket.data.user = verified;
+    next();
+  });
 
-    // Send initial message hydration on socket connect
-    ws.send(
-      JSON.stringify({
-        type: 'init:messages',
-        payload: storedMessages,
-      })
+  io.on('connection', (socket) => {
+    const user = socket.data.user as VerifiedChatUser;
+    const convRoom = (convId: string) => `conv:${convId}`;
+    const userRoom = (uid: string) => `user:${uid}`;
+
+    socket.join(userRoom(user.userId));
+
+    const existingSet = onlineSocketsByUser.get(user.userId) || new Set<string>();
+    const wasOffline = existingSet.size === 0;
+    existingSet.add(socket.id);
+    onlineSocketsByUser.set(user.userId, existingSet);
+
+    // Hydrate current online user IDs for the newly connected socket
+    socket.emit('online-users', { userIds: getOnlineUserIds() });
+
+    if (wasOffline) {
+      io.emit('user-online', {
+        userId: user.userId,
+        userName: user.userName,
+        userRole: user.userRole,
+      });
+    }
+
+    socket.on(
+      'join-conversation',
+      (
+        payload: { conversationId?: string; projectId?: string } | string,
+        ack?: (resp: { ok: boolean; conversationId?: string; messages?: StoredMessage[]; error?: string }) => void
+      ) => {
+        const rawConvId = typeof payload === 'string' ? payload : payload?.conversationId;
+        const rawProjId = typeof payload === 'object' && payload ? payload.projectId : undefined;
+        const convId = sanitizeId(rawConvId);
+        const projId = sanitizeId(rawProjId);
+
+        const conv =
+          (convId && getConversationById(convId)) ||
+          (projId && getConversationByProjectAndUser(projId, user));
+
+        if (!conv) {
+          const errorMsg = 'Conversation not found or access denied.';
+          socket.emit('chat-error', { code: 'NOT_FOUND', message: errorMsg });
+          ack?.({ ok: false, error: errorMsg });
+          return;
+        }
+
+        if (!isUserParticipant(conv, user)) {
+          const errorMsg = 'Unauthorized: you are not a participant in this private conversation.';
+          socket.emit('chat-error', { code: 'FORBIDDEN', message: errorMsg });
+          ack?.({ ok: false, error: errorMsg });
+          return;
+        }
+
+        socket.join(convRoom(conv.conversationId));
+        const history = getMessagesForConversation(conv.conversationId);
+        ack?.({
+          ok: true,
+          conversationId: conv.conversationId,
+          messages: history,
+        });
+      }
     );
 
-    ws.on('message', (data) => {
-      try {
-        const event = JSON.parse(data.toString());
-        if (!event || typeof event.type !== 'string') return;
+    socket.on(
+      'send-message',
+      (
+        payload: {
+          conversationId?: string;
+          message?: string;
+          content?: string;
+          messageType?: string;
+          messageId?: string;
+        },
+        ack?: (resp: { ok: boolean; message?: StoredMessage; error?: string; retryAfterMs?: number }) => void
+      ) => {
+        const convId = sanitizeId(payload?.conversationId);
+        const conv = convId ? getConversationById(convId) : undefined;
 
-        switch (event.type) {
-          case 'room:join': {
-            const { projectId, userId, userName, userRole } = event;
-            if (typeof projectId === 'string' && projectId) {
-              session.rooms.add(projectId);
-              if (userId) {
-                session.user = {
-                  userId: String(userId),
-                  userName: String(userName || 'Portal User'),
-                  userRole: String(userRole || 'client'),
-                };
-              }
-              const participants = getRoomParticipants(projectId);
-              broadcastToRoom(projectId, {
-                type: 'presence:update',
-                projectId,
-                users: participants,
-              });
-            }
-            break;
-          }
-
-          case 'room:leave': {
-            const { projectId } = event;
-            if (typeof projectId === 'string') {
-              session.rooms.delete(projectId);
-              const participants = getRoomParticipants(projectId);
-              broadcastToRoom(projectId, {
-                type: 'presence:update',
-                projectId,
-                users: participants,
-              });
-            }
-            break;
-          }
-
-          case 'message:send': {
-            const msg = event.payload as ChatMessage;
-            const added = upsertMessage(msg);
-            if (added) {
-              broadcastAll({
-                type: 'message:created',
-                payload: msg,
-              });
-            }
-            break;
-          }
-
-          case 'typing:state': {
-            const { projectId, userId, userName, isTyping } = event;
-            if (typeof projectId === 'string' && userId) {
-              broadcastToRoom(
-                projectId,
-                {
-                  type: 'typing:update',
-                  projectId,
-                  userId,
-                  userName,
-                  isTyping: Boolean(isTyping),
-                },
-                ws
-              );
-            }
-            break;
-          }
+        if (!conv) {
+          const errorMsg = 'Conversation does not exist.';
+          socket.emit('chat-error', { code: 'NOT_FOUND', message: errorMsg });
+          ack?.({ ok: false, error: errorMsg });
+          return;
         }
-      } catch (err) {
-        console.error('WebSocket message parse error:', err);
+
+        if (!isUserParticipant(conv, user)) {
+          const errorMsg = 'Unauthorized: cannot send messages to a conversation you do not belong to.';
+          socket.emit('chat-error', { code: 'FORBIDDEN', message: errorMsg });
+          ack?.({ ok: false, error: errorMsg });
+          return;
+        }
+
+        const rateCheck = checkMessageRateLimit(user.userId);
+        if (!rateCheck.allowed) {
+          const errorMsg = `Rate limit exceeded. Please wait ${Math.ceil(rateCheck.retryAfterMs / 1000)}s before sending more messages.`;
+          socket.emit('chat-error', {
+            code: 'RATE_LIMITED',
+            message: errorMsg,
+            retryAfterMs: rateCheck.retryAfterMs,
+          });
+          ack?.({ ok: false, error: errorMsg, retryAfterMs: rateCheck.retryAfterMs });
+          return;
+        }
+
+        const validation = validateMessageContent(payload?.message ?? payload?.content);
+        if (!validation.valid) {
+          socket.emit('chat-error', { code: 'INVALID_PAYLOAD', message: validation.error });
+          ack?.({ ok: false, error: validation.error });
+          return;
+        }
+
+        const rawType = typeof payload?.messageType === 'string' ? payload.messageType.trim() : 'general';
+        const messageType = (VALID_MESSAGE_TYPES.has(rawType) ? rawType : 'general') as StoredMessage['messageType'];
+        const isSenderClient = conv.clientId === user.userId;
+        const recipientId = isSenderClient ? conv.freelancerId : conv.clientId;
+        const recipientName = isSenderClient
+          ? conv.freelancerName || 'Freelancer'
+          : conv.clientName || 'Client';
+
+        const now = new Date().toISOString();
+        const clientProvidedId = sanitizeId(payload?.messageId);
+        const msgId = clientProvidedId || `msg-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+        // Strictly derive senderId, senderName, and senderRole from verified server auth token
+        const storedMsg: StoredMessage = {
+          messageId: msgId,
+          id: msgId,
+          conversationId: conv.conversationId,
+          projectId: conv.projectId,
+          projectName: conv.projectName,
+          senderId: user.userId,
+          senderName: user.userName,
+          senderRole: user.userRole,
+          recipientId,
+          recipientName,
+          message: validation.text,
+          content: validation.text,
+          messageType,
+          tag: (['general', 'milestone', 'revision', 'deliverable', 'payment'].includes(messageType)
+            ? messageType
+            : 'general') as StoredMessage['tag'],
+          isRead: false,
+          createdAt: now,
+          timestamp: now,
+        };
+
+        const { added, message: savedMsg } = addMessageToStore(storedMsg);
+        if (added) {
+          // Deliver to authorized participants only via private room + participant user channels
+          io.to(convRoom(conv.conversationId))
+            .to(userRoom(conv.clientId))
+            .to(userRoom(conv.freelancerId))
+            .emit('receive-message', savedMsg);
+        }
+
+        ack?.({ ok: true, message: savedMsg });
       }
+    );
+
+    socket.on('typing', (payload: { conversationId?: string }) => {
+      const convId = sanitizeId(payload?.conversationId);
+      const conv = convId ? getConversationById(convId) : undefined;
+      if (!conv || !isUserParticipant(conv, user)) return;
+
+      socket.to(convRoom(conv.conversationId)).emit('typing', {
+        conversationId: conv.conversationId,
+        projectId: conv.projectId,
+        userId: user.userId,
+        userName: user.userName,
+      });
     });
 
-    ws.on('close', () => {
-      const joinedRooms = Array.from(session.rooms);
-      sessions.delete(ws);
-      for (const room of joinedRooms) {
-        if (room !== '*') {
-          broadcastToRoom(room, {
-            type: 'presence:update',
-            projectId: room,
-            users: getRoomParticipants(room),
+    socket.on('stop-typing', (payload: { conversationId?: string }) => {
+      const convId = sanitizeId(payload?.conversationId);
+      const conv = convId ? getConversationById(convId) : undefined;
+      if (!conv || !isUserParticipant(conv, user)) return;
+
+      socket.to(convRoom(conv.conversationId)).emit('stop-typing', {
+        conversationId: conv.conversationId,
+        projectId: conv.projectId,
+        userId: user.userId,
+        userName: user.userName,
+      });
+    });
+
+    socket.on(
+      'message-read',
+      (
+        payload: { conversationId?: string; messageIds?: string[] },
+        ack?: (resp: { ok: boolean; updatedMessageIds?: string[]; error?: string }) => void
+      ) => {
+        const convId = sanitizeId(payload?.conversationId);
+        const conv = convId ? getConversationById(convId) : undefined;
+        if (!conv || !isUserParticipant(conv, user)) {
+          ack?.({ ok: false, error: 'Unauthorized conversation read update.' });
+          return;
+        }
+
+        const safeIds = Array.isArray(payload?.messageIds)
+          ? payload.messageIds.map((id) => sanitizeId(id)).filter(Boolean)
+          : undefined;
+        const { updatedMessageIds, readAt } = markConversationMessagesRead(conv.conversationId, user.userId, safeIds);
+
+        if (updatedMessageIds.length > 0) {
+          const partnerId = conv.clientId === user.userId ? conv.freelancerId : conv.clientId;
+          io.to(convRoom(conv.conversationId)).to(userRoom(partnerId)).emit('message-read', {
+            conversationId: conv.conversationId,
+            messageIds: updatedMessageIds,
+            readBy: user.userId,
+            readAt,
           });
+        }
+
+        ack?.({ ok: true, updatedMessageIds });
+      }
+    );
+
+    socket.on('disconnect', () => {
+      const userSockets = onlineSocketsByUser.get(user.userId);
+      if (userSockets) {
+        userSockets.delete(socket.id);
+        if (userSockets.size === 0) {
+          onlineSocketsByUser.delete(user.userId);
+          io.emit('user-offline', { userId: user.userId });
         }
       }
     });
   });
+
+  // Express Bearer Chat Auth Middleware
+  function requireChatAuth(req: express.Request, res: express.Response): VerifiedChatUser | null {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const verified = verifyChatToken(token);
+    if (!verified) {
+      res.status(401).json({ ok: false, message: 'Authentication required for chat access.' });
+      return null;
+    }
+    return verified;
+  }
 
   // REST API Endpoints
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, connectedClients: sessions.size, messageCount: storedMessages.length });
+    const stats = getStoreStats();
+    res.json({
+      ok: true,
+      onlineUsers: getOnlineUserIds().length,
+      conversationCount: stats.conversationCount,
+      messageCount: stats.messageCount,
+    });
   });
 
-  app.get('/api/messages', (req, res) => {
-    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
-    if (projectId) {
-      res.json({ messages: storedMessages.filter((m) => m.projectId === projectId) });
-    } else {
-      res.json({ messages: storedMessages });
-    }
-  });
+  // Issue a server-signed chat JWT/HMAC token for authenticated workspace sessions
+  app.post('/api/chat/session', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const userId = sanitizeId(body.userId);
+    const userName = typeof body.userName === 'string' ? body.userName.trim().slice(0, 120) : '';
+    const userRole = body.userRole;
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, 160) : undefined;
 
-  app.post('/api/messages', (req, res) => {
-    const msg = req.body as ChatMessage;
-    if (!msg || !msg.id || !msg.projectId || !msg.content) {
-      res.status(400).json({ error: 'Invalid message payload' });
+    if (!userId || !userName || !['admin', 'freelancer', 'client'].includes(userRole)) {
+      res.status(400).json({ ok: false, message: 'Valid userId, userName, and userRole are required.' });
       return;
     }
-    const added = upsertMessage(msg);
-    if (added) {
-      broadcastAll({
-        type: 'message:created',
-        payload: msg,
-      });
+
+    if (userRole === 'admin') {
+      const authHeader = req.headers.authorization || '';
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const rawAdminToken = bearer || (typeof body.adminToken === 'string' ? body.adminToken.trim() : '');
+      const verifiedAdmin = verifyAdminToken(rawAdminToken);
+      if (!verifiedAdmin) {
+        res.status(403).json({ ok: false, message: 'Valid admin authentication required for admin chat session.' });
+        return;
+      }
     }
-    res.json({ ok: true, message: msg, duplicate: !added });
+
+    const token = createChatToken({
+      userId,
+      userName,
+      userRole,
+      email,
+    });
+
+    res.json({
+      ok: true,
+      token,
+      user: { userId, userName, userRole, email },
+      onlineUserIds: getOnlineUserIds(),
+    });
   });
 
-  app.post('/api/sandbox/reset', (_req, res) => {
-    storedMessages = [];
-    saveMessagesToDisk();
-    broadcastAll({ type: 'sandbox:reset' });
+  // List authorized conversations for the signed-in user
+  app.get('/api/conversations', (req, res) => {
+    const user = requireChatAuth(req, res);
+    if (!user) return;
+    const list = getEnrichedUserConversations(user);
+    res.json({ ok: true, conversations: list, onlineUserIds: getOnlineUserIds() });
+  });
+
+  // Create or retrieve an authorized 1-to-1 project conversation
+  app.post('/api/conversations', (req, res) => {
+    const user = requireChatAuth(req, res);
+    if (!user) return;
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const projectId = sanitizeId(body.projectId);
+    const clientId = sanitizeId(body.clientId);
+    const freelancerId = sanitizeId(body.freelancerId);
+
+    if (!projectId || !clientId || !freelancerId) {
+      res.status(400).json({ ok: false, message: 'projectId, clientId, and freelancerId are required.' });
+      return;
+    }
+
+    // Never allow creating a conversation unless the requester is one of the two participants
+    if (user.userId !== clientId && user.userId !== freelancerId) {
+      res.status(403).json({
+        ok: false,
+        message: 'Unauthorized: you can only open conversations in which you participate.',
+      });
+      return;
+    }
+
+    const conv = upsertConversation({
+      projectId,
+      clientId,
+      freelancerId,
+      projectName: typeof body.projectName === 'string' ? body.projectName.trim().slice(0, 160) : undefined,
+      clientName: typeof body.clientName === 'string' ? body.clientName.trim().slice(0, 120) : undefined,
+      freelancerName: typeof body.freelancerName === 'string' ? body.freelancerName.trim().slice(0, 120) : undefined,
+      clientAvatar: typeof body.clientAvatar === 'string' ? body.clientAvatar.slice(0, 500) : undefined,
+      freelancerAvatar: typeof body.freelancerAvatar === 'string' ? body.freelancerAvatar.slice(0, 500) : undefined,
+    });
+
+    const convMessages = getMessagesForConversation(conv.conversationId);
+    const lastMsg = convMessages[convMessages.length - 1];
+    const enriched = {
+      ...conv,
+      lastMessage: lastMsg?.message,
+      lastMessageAt: lastMsg?.createdAt || conv.updatedAt,
+      unreadCount: convMessages.filter((m) => m.senderId !== user.userId && !m.isRead).length,
+    };
+
+    io.to(`user:${clientId}`).to(`user:${freelancerId}`).emit('conversation:updated', enriched);
+    res.json({ ok: true, conversation: enriched, messages: convMessages });
+  });
+
+  // Fetch persistent message history for a specific conversation (membership verified)
+  app.get('/api/conversations/:conversationId/messages', (req, res) => {
+    const user = requireChatAuth(req, res);
+    if (!user) return;
+
+    const conversationId = sanitizeId(req.params.conversationId);
+    const conv = conversationId ? getConversationById(conversationId) : undefined;
+    if (!conv) {
+      res.status(404).json({ ok: false, message: 'Conversation not found.' });
+      return;
+    }
+    if (!isUserParticipant(conv, user)) {
+      res.status(403).json({ ok: false, message: 'Forbidden: unauthorized conversation access.' });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      conversation: conv,
+      messages: getMessagesForConversation(conv.conversationId),
+    });
+  });
+
+  // Mark messages in a conversation as read via REST
+  app.post('/api/conversations/:conversationId/read', (req, res) => {
+    const user = requireChatAuth(req, res);
+    if (!user) return;
+
+    const conversationId = sanitizeId(req.params.conversationId);
+    const conv = conversationId ? getConversationById(conversationId) : undefined;
+    if (!conv) {
+      res.status(404).json({ ok: false, message: 'Conversation not found.' });
+      return;
+    }
+    if (!isUserParticipant(conv, user)) {
+      res.status(403).json({ ok: false, message: 'Forbidden: unauthorized conversation access.' });
+      return;
+    }
+
+    const { updatedMessageIds, readAt } = markConversationMessagesRead(conv.conversationId, user.userId);
+    if (updatedMessageIds.length > 0) {
+      const partnerId = conv.clientId === user.userId ? conv.freelancerId : conv.clientId;
+      io.to(`conv:${conv.conversationId}`).to(`user:${partnerId}`).emit('message-read', {
+        conversationId: conv.conversationId,
+        messageIds: updatedMessageIds,
+        readBy: user.userId,
+        readAt,
+      });
+    }
+
+    res.json({ ok: true, updatedMessageIds, readAt });
+  });
+
+  app.get('/api/freelancers', (_req, res) => {
+    res.json({
+      freelancers: storedFreelancers.filter((f) => f.isListedInDirectory !== false),
+    });
+  });
+
+  app.post('/api/freelancers', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!id || !name) {
+      res.status(400).json({ ok: false, message: 'Freelancer id and name are required.' });
+      return;
+    }
+
+    const record: PublicFreelancerRecord = {
+      id,
+      name,
+      username: typeof body.username === 'string' ? body.username.trim() : name.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      avatarUrl: typeof body.avatarUrl === 'string' ? body.avatarUrl : undefined,
+      company: typeof body.company === 'string' ? body.company.trim() : 'Independent Studio',
+      bio: typeof body.bio === 'string' ? body.bio.trim() : '',
+      address: typeof body.address === 'string' ? body.address.trim() : 'Remote / Pakistan',
+      headline: typeof body.headline === 'string' && body.headline.trim()
+        ? body.headline.trim()
+        : 'Full-Stack Freelancer & Digital Specialist',
+      category: typeof body.category === 'string' && body.category.trim()
+        ? body.category.trim()
+        : 'Web Development',
+      skills: Array.isArray(body.skills)
+        ? body.skills.map((s: unknown) => String(s).trim()).filter(Boolean).slice(0, 10)
+        : ['Web Development', 'UI/UX'],
+      hourlyRatePkr: Number.isFinite(Number(body.hourlyRatePkr)) && Number(body.hourlyRatePkr) > 0
+        ? Number(body.hourlyRatePkr)
+        : 3500,
+      availability:
+        body.availability === 'busy' || body.availability === 'unavailable'
+          ? body.availability
+          : 'available',
+      isListedInDirectory: body.isListedInDirectory !== false,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const existingIndex = storedFreelancers.findIndex((f) => f.id === id);
+    if (existingIndex >= 0) {
+      storedFreelancers[existingIndex] = record;
+    } else {
+      storedFreelancers.unshift(record);
+    }
+    saveFreelancersToDisk();
+    io.emit('freelancers:updated', {
+      freelancers: storedFreelancers.filter((f) => f.isListedInDirectory !== false),
+    });
+    res.json({ ok: true, freelancer: record });
+  });
+
+  app.post('/api/sandbox/reset', (req, res) => {
+    const authHeader = req.headers.authorization || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const user = verifyChatToken(bearer) || verifyAdminToken(bearer);
+    if (!user) {
+      res.status(401).json({ ok: false, message: 'Authentication required to reset sandbox.' });
+      return;
+    }
+    clearChatStoreForSandbox();
+    io.emit('sandbox:reset');
     res.json({ ok: true, messageCount: 0 });
   });
 

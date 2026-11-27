@@ -10,12 +10,15 @@ import {
   Download,
   Check,
   Printer,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { formatCurrency } from '../utils/calculations';
-import { Invoice } from '../types';
+import { Invoice, Project } from '../types';
 import { RecentProjectsWidget } from './RecentProjectsWidget';
-import { ProjectChatRoom } from './ProjectChatRoom';
+import { ChatWorkspace } from './ChatWorkspace';
+import { ProjectDetailsModal } from './ProjectDetailsModal';
+import { FindFreelancersView } from './FindFreelancersView';
 
 export const ClientPortal: React.FC = () => {
   const {
@@ -24,13 +27,15 @@ export const ClientPortal: React.FC = () => {
     invoices,
     files,
     messages,
+    unreadTotalCount,
     currency,
     setSelectedInvoiceForPayment,
-    openProjectChat,
+    openConversationForProject,
   } = usePortal();
 
-  const [activeTab, setActiveTab] = useState<'projects' | 'files' | 'invoices' | 'chat'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'discover' | 'files' | 'invoices' | 'chat'>('projects');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedProjectDetails, setSelectedProjectDetails] = useState<Project | null>(null);
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const [selectedChatProjId, setSelectedChatProjId] = useState<string>('');
 
@@ -62,8 +67,6 @@ export const ClientPortal: React.FC = () => {
     .filter((i) => i.status === 'sent' || i.status === 'overdue')
     .reduce((sum, i) => sum + i.total, 0);
 
-  const selectedChatProject = myProjects.find((p) => p.id === selectedChatProjId) || myProjects[0] || null;
-
   const handlePayInvoice = (inv: Invoice) => {
     setSelectedInvoiceForPayment(inv);
   };
@@ -73,11 +76,18 @@ export const ClientPortal: React.FC = () => {
     setTimeout(() => setDownloadNotice(null), 3200);
   };
 
-  const tabs: Array<{ id: 'projects' | 'files' | 'invoices' | 'chat'; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  const handleMessageFreelancer = (proj: Project) => {
+    setSelectedChatProjId(proj.id);
+    setActiveTab('chat');
+    void openConversationForProject(proj);
+  };
+
+  const tabs: Array<{ id: 'projects' | 'discover' | 'files' | 'invoices' | 'chat'; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
     { id: 'projects', label: `My Projects (${myProjects.length})`, icon: Briefcase },
+    { id: 'discover', label: 'Find Freelancers', icon: Search },
     { id: 'files', label: `Deliverables & Files (${myFiles.length})`, icon: FolderOpen },
     { id: 'invoices', label: `Invoices (${myInvoices.length})`, icon: FileText },
-    { id: 'chat', label: 'Project Discussion', icon: MessageSquare },
+    { id: 'chat', label: 'Messages', icon: MessageSquare, badge: unreadTotalCount },
   ];
 
   return (
@@ -163,6 +173,11 @@ export const ClientPortal: React.FC = () => {
             >
               <Icon className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{tab.label}</span>
+              {typeof tab.badge === 'number' && tab.badge > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white font-mono text-[10px] font-bold tabular-nums">
+                  {tab.badge}
+                </span>
+              )}
               {isActive && (
                 <motion.span
                   layoutId="client-portal-tab"
@@ -212,14 +227,23 @@ export const ClientPortal: React.FC = () => {
                           </p>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => openProjectChat(proj.id)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 tabular-nums"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Chat{msgCount > 0 ? ` (${msgCount})` : ''}</span>
-                        </button>
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleMessageFreelancer(proj)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer tabular-nums"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Message Freelancer{msgCount > 0 ? ` (${msgCount})` : ''}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProjectDetails(proj)}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer"
+                          >
+                            Details
+                          </button>
+                        </div>
                       </div>
 
                       <p className="text-xs text-slate-600 leading-relaxed">{proj.description}</p>
@@ -282,7 +306,17 @@ export const ClientPortal: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Files */}
+      {/* Tab 2: Find Freelancers Directory */}
+      {activeTab === 'discover' && (
+        <FindFreelancersView
+          compactHeader
+          onNavigateView={(view) => {
+            if (view === 'client') setActiveTab('projects');
+          }}
+        />
+      )}
+
+      {/* Tab 3: Files */}
       {activeTab === 'files' && (
         <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-xs space-y-4">
           <div>
@@ -403,75 +437,13 @@ export const ClientPortal: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 4: Project-Scoped Real-Time Discussion */}
+      {/* Tab 4: Socket.IO Real-Time Messaging Workspace */}
       {activeTab === 'chat' && (
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[540px]">
-          <div className="border-b md:border-b-0 md:border-r border-slate-200 p-4 space-y-3 bg-slate-50/50">
-            <div>
-              <h3 className="font-display font-bold text-slate-950 text-xs uppercase tracking-wider">
-                Your Project Rooms
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Har project ka alag real-time discussion room
-              </p>
-            </div>
-
-            {myProjects.length === 0 ? (
-              <div className="p-4 rounded-xl bg-white border border-slate-200 text-xs text-slate-500">
-                Koi project assigned nahi hai. Jab aap project submit karenge ya freelancer add karega, yahan room open ho jayega.
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {myProjects.map((proj) => {
-                  const isSelected = selectedChatProject?.id === proj.id;
-                  const count = messages.filter((m) => m.projectId === proj.id).length;
-                  return (
-                    <button
-                      key={proj.id}
-                      type="button"
-                      onClick={() => setSelectedChatProjId(proj.id)}
-                      className={`w-full p-3 rounded-xl text-left transition flex items-start justify-between gap-2 cursor-pointer ${
-                        isSelected
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="font-semibold text-xs truncate">{proj.name}</div>
-                        <div className={`text-[10px] mt-0.5 truncate ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
-                          Freelancer: {proj.freelancerName} · {proj.progress}%
-                        </div>
-                      </div>
-                      {count > 0 && (
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-bold tabular-nums shrink-0 ${
-                            isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-                          }`}
-                        >
-                          {count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="md:col-span-2 flex flex-col min-h-[480px]">
-            {selectedChatProject ? (
-              <ProjectChatRoom project={selectedChatProject} />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-2 text-slate-500 text-xs">
-                <MessageSquare className="w-8 h-8 text-slate-300" aria-hidden="true" />
-                <div className="font-semibold text-slate-800 text-sm">No Project Room Selected</div>
-                <p className="max-w-xs">
-                  Select a project from the list to chat directly with your freelancer.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+        <ChatWorkspace
+          role="client"
+          initialProjectId={selectedChatProjId}
+          onOpenProjectDetails={(proj) => setSelectedProjectDetails(proj)}
+        />
       )}
 
       {/* Invoice receipt modal */}
@@ -541,6 +513,12 @@ export const ClientPortal: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+      <ProjectDetailsModal
+        project={selectedProjectDetails}
+        viewerRole="client"
+        onClose={() => setSelectedProjectDetails(null)}
+        onMessagePartner={handleMessageFreelancer}
+      />
     </div>
   );
 };

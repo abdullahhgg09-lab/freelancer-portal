@@ -7,16 +7,14 @@ import {
   Send,
   X,
   MessageSquare,
-  CheckCircle2,
-  Clock,
-  FileCode2,
-  RefreshCw,
+  Check,
+  CheckCheck,
   Wifi,
   WifiOff,
   Calendar,
-  Sparkles,
   UserCheck,
-  Briefcase
+  Briefcase,
+  AlertCircle,
 } from 'lucide-react';
 
 interface ProjectChatRoomProps {
@@ -40,13 +38,17 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
   const {
     currentUser,
     messages,
+    conversations,
+    onlineUserIds,
+    chatError,
+    clearChatError,
     sendMessage,
     wsStatus,
-    roomPresence,
     roomTyping,
     joinProjectRoom,
     leaveProjectRoom,
     sendTypingState,
+    markConversationRead,
   } = usePortal();
 
   const [text, setText] = useState('');
@@ -56,8 +58,13 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
 
   const currentUserId = currentUser?.id || 'guest';
   const isClientViewer = currentUser?.role === 'client';
+  const partnerId = isClientViewer ? project.freelancerId : project.clientId;
+  const partnerName = isClientViewer ? project.freelancerName : project.clientName;
+  const partnerRoleLabel = isClientViewer ? 'Project Maker (Freelancer)' : 'Project Client';
+  const isPartnerOnline = onlineUserIds.includes(partnerId);
+  const activeConv = conversations.find((c) => c.projectId === project.id);
 
-  // Join project WebSocket room on mount / project change
+  // Join project Socket.IO conversation room on mount / project change
   useEffect(() => {
     joinProjectRoom(project.id);
     return () => {
@@ -67,8 +74,15 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
   }, [project.id, joinProjectRoom, leaveProjectRoom, sendTypingState]);
 
   const projectMessages = messages.filter((m) => m.projectId === project.id);
-  const activeUsersInRoom = roomPresence[project.id] || [];
   const typingUsers = (roomTyping[project.id] || []).filter((u) => u.userId !== currentUserId);
+
+  useEffect(() => {
+    if (!activeConv) return;
+    const hasUnread = projectMessages.some((m) => m.senderId !== currentUserId && !m.isRead);
+    if (hasUnread) {
+      void markConversationRead(activeConv.conversationId);
+    }
+  }, [activeConv, projectMessages, currentUserId, markConversationRead]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -90,10 +104,8 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
     const clean = text.trim();
     if (!clean) return;
 
-    const recipientId = isClientViewer ? project.freelancerId : project.clientId;
-    const recipientName = isClientViewer ? project.freelancerName : project.clientName;
-
-    sendMessage(project.id, clean, recipientId, recipientName, selectedTag, project.name);
+    clearChatError();
+    sendMessage(project.id, clean, partnerId, partnerName, selectedTag, project.name);
     setText('');
     sendTypingState(project.id, false);
   };
@@ -110,27 +122,24 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
         { label: 'Clarify requirement', text: 'Is feature ke design/flow par aap se ek quick confirmation chahiye.', tag: 'general' as MessageTag },
       ];
 
-  const partnerName = isClientViewer ? project.freelancerName : project.clientName;
-  const partnerRoleLabel = isClientViewer ? 'Project Maker (Freelancer)' : 'Project Client';
-
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-200/80 bg-slate-950 text-white flex items-start justify-between gap-3 shrink-0">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2 text-[11px] text-slate-300">
-            <span className="font-medium text-indigo-300">Project Discussion Room</span>
+            <span className="font-medium text-indigo-300">Private Project Chat</span>
             <span aria-hidden="true">·</span>
             <span className="inline-flex items-center gap-1 tabular-nums">
               {wsStatus === 'connected' ? (
                 <>
                   <Wifi className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                  <span className="text-emerald-300">Live Sync</span>
+                  <span className="text-emerald-300">Socket.IO Live</span>
                 </>
               ) : (
                 <>
                   <WifiOff className="w-3 h-3 text-amber-400" aria-hidden="true" />
-                  <span className="text-amber-300">Local Sync</span>
+                  <span className="text-amber-300">Reconnecting</span>
                 </>
               )}
             </span>
@@ -150,15 +159,12 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
               {partnerRoleLabel}: {partnerName}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="tabular-nums">{project.progress}% complete</span>
+            <span className={`inline-flex items-center gap-1 font-medium ${isPartnerOnline ? 'text-emerald-300' : 'text-slate-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isPartnerOnline ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+              {isPartnerOnline ? 'Online' : 'Offline'}
+            </span>
             <span aria-hidden="true">·</span>
             <span className="tabular-nums font-mono">{formatCurrency(project.budget, project.currency)}</span>
-            {activeUsersInRoom.length > 1 && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="text-emerald-300">{activeUsersInRoom.length} active in room</span>
-              </>
-            )}
           </div>
         </div>
 
@@ -193,6 +199,23 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
         </div>
       </div>
 
+      {chatError && (
+        <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" aria-hidden="true" />
+            <span>{chatError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={clearChatError}
+            className="text-rose-700 hover:text-rose-950 p-0.5 cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Messages Feed */}
       <div
         ref={scrollRef}
@@ -217,10 +240,10 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
           <AnimatePresence initial={false}>
             {projectMessages.map((msg) => {
               const isMe = msg.senderId === currentUserId;
-              const tagMeta = MESSAGE_TAGS.find((t) => t.id === (msg.tag || 'general'));
+              const tagMeta = MESSAGE_TAGS.find((t) => t.id === (msg.tag || msg.messageType || 'general'));
               return (
                 <motion.div
-                  key={msg.id}
+                  key={msg.messageId || msg.id}
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
@@ -237,7 +260,7 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
                       <span className={`font-semibold ${isMe ? 'text-indigo-200' : 'text-slate-600'}`}>
                         {msg.senderName} · {msg.senderRole === 'client' ? 'Client' : 'Freelancer'}
                       </span>
-                      {msg.tag && msg.tag !== 'general' && tagMeta && (
+                      {(msg.tag || msg.messageType) && (msg.tag || msg.messageType) !== 'general' && tagMeta && (
                         <span
                           className={`px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide text-[9px] ${
                             isMe ? 'bg-white/15 text-white' : tagMeta.color
@@ -247,11 +270,23 @@ export const ProjectChatRoom: React.FC<ProjectChatRoomProps> = ({
                         </span>
                       )}
                     </div>
-                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                    <p className="whitespace-pre-wrap break-words">{msg.message || msg.content}</p>
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-1 tabular-nums px-1">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-1 px-1 text-[10px] text-slate-400 tabular-nums">
+                    <span>
+                      {new Date(msg.createdAt || msg.timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    {isMe && (
+                      msg.isRead ? (
+                        <CheckCheck className="w-3.5 h-3.5 text-indigo-600" aria-label="Read" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5 text-slate-400" aria-label="Sent" />
+                      )
+                    )}
+                  </div>
                 </motion.div>
               );
             })}

@@ -130,20 +130,38 @@ CREATE TABLE IF NOT EXISTS public.portal_files (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 9. Messages Table (Real-time chat)
+-- 9. Conversations Table (Private 1-to-1 Project Chats)
+CREATE TABLE IF NOT EXISTS public.portal_conversations (
+    conversation_id VARCHAR(120) PRIMARY KEY,
+    client_id VARCHAR(120) NOT NULL,
+    freelancer_id VARCHAR(120) NOT NULL,
+    project_id VARCHAR(120) NOT NULL,
+    client_name VARCHAR(255),
+    freelancer_name VARCHAR(255),
+    project_name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (project_id, client_id, freelancer_id)
+);
+
+-- 10. Messages Table (Real-time Socket.IO persistent chat)
 CREATE TABLE IF NOT EXISTS public.portal_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID REFERENCES public.portal_projects(id) ON DELETE CASCADE NOT NULL,
-    sender_id UUID NOT NULL,
+    message_id VARCHAR(120) PRIMARY KEY,
+    conversation_id VARCHAR(120) REFERENCES public.portal_conversations(conversation_id) ON DELETE CASCADE NOT NULL,
+    project_id VARCHAR(120) NOT NULL,
+    sender_id VARCHAR(120) NOT NULL,
     sender_name VARCHAR(255) NOT NULL,
     sender_role user_role_enum NOT NULL,
-    recipient_id UUID NOT NULL,
+    recipient_id VARCHAR(120) NOT NULL,
     recipient_name VARCHAR(255),
-    content TEXT NOT NULL,
+    message TEXT NOT NULL,
+    message_type VARCHAR(40) DEFAULT 'text' NOT NULL,
+    is_read BOOLEAN DEFAULT FALSE NOT NULL,
+    read_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 10. Activity Audit Logs (Super Admin viewable)
+-- 11. Activity Audit Logs (Super Admin viewable)
 CREATE TABLE IF NOT EXISTS public.portal_activity_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,
@@ -155,15 +173,19 @@ CREATE TABLE IF NOT EXISTS public.portal_activity_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 11. Initial Seed Data (Admin user 'abdary' and demo data)
+-- 12. Initial Seed Data (Admin user 'abdary' and demo data)
 INSERT INTO public.portal_users (username, email, full_name, role, status)
 VALUES ('abdary', 'admin@freelancerportal.pk', 'Abdary (Super Admin)', 'admin', 'active')
 ON CONFLICT (username) DO NOTHING;
 
--- 12. Indexes for High Performance
+-- 13. Indexes for High Performance
 CREATE INDEX IF NOT EXISTS idx_projects_freelancer ON public.portal_projects(freelancer_id);
 CREATE INDEX IF NOT EXISTS idx_projects_client ON public.portal_projects(client_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_freelancer ON public.portal_invoices(freelancer_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_client ON public.portal_conversations(client_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_freelancer ON public.portal_conversations(freelancer_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_project ON public.portal_conversations(project_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON public.portal_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_project ON public.portal_messages(project_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON public.portal_activity_logs(created_at DESC);
 `;

@@ -38,10 +38,21 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
   const [bio, setBio] = useState(currentUser?.bio || 'Full-Stack Freelance Professional & UI/UX Specialist');
   const [address, setAddress] = useState(currentUser?.address || 'Lahore, Pakistan');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || '');
+  const [headline, setHeadline] = useState(currentUser?.headline || 'Full-Stack Freelancer & Digital Specialist');
+  const [category, setCategory] = useState(currentUser?.category || 'Web Development');
+  const [skillsText, setSkillsText] = useState(
+    currentUser?.skills?.join(', ') || 'React, TypeScript, UI/UX Design, Client Portal'
+  );
+  const [hourlyRatePkr, setHourlyRatePkr] = useState<number>(currentUser?.hourlyRatePkr || 3500);
+  const [availability, setAvailability] = useState<'available' | 'busy' | 'unavailable'>(
+    currentUser?.availability || 'available'
+  );
+  const [isListedInDirectory, setIsListedInDirectory] = useState<boolean>(
+    currentUser?.isListedInDirectory !== false
+  );
 
   const [savedNotification, setSavedNotification] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [customUrlInput, setCustomUrlInput] = useState('');
 
   // Preset avatar choices for quick 1-click selection
   const avatarPresets = [
@@ -74,6 +85,11 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    const parsedSkills = skillsText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     updateUserProfile({
       name,
       username,
@@ -83,6 +99,12 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
       bio,
       address,
       avatarUrl,
+      headline: headline.trim(),
+      category,
+      skills: parsedSkills,
+      hourlyRatePkr: Number(hourlyRatePkr) || 3500,
+      availability,
+      isListedInDirectory,
     });
     setSavedNotification(true);
     setTimeout(() => setSavedNotification(false), 3000);
@@ -314,6 +336,98 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ onBack }) => {
                 className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500"
               />
             </div>
+
+            {(currentUser?.role === 'freelancer' || currentUser?.role === 'admin') && (
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-display font-bold text-slate-900 text-sm">
+                      Public Find-Freelancers Directory Listing
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Clients search karte waqt aap ki specialty, skills aur hourly rate dekh kar hire kar sakte hain.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isListedInDirectory}
+                      onChange={(e) => setIsListedInDirectory(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Show in Directory</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="prof-headline" className="block font-semibold text-slate-700 mb-1">Service Headline</label>
+                    <input
+                      id="prof-headline"
+                      type="text"
+                      value={headline}
+                      onChange={(e) => setHeadline(e.target.value)}
+                      placeholder="e.g. Senior React & Next.js Developer"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="prof-category" className="block font-semibold text-slate-700 mb-1">Primary Category</label>
+                    <select
+                      id="prof-category"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+                    >
+                      <option value="Web Development">Web Development</option>
+                      <option value="Mobile App">Mobile App</option>
+                      <option value="UI/UX Design">UI/UX Design</option>
+                      <option value="Branding">Branding</option>
+                      <option value="SaaS Architecture">SaaS Architecture</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="prof-rate" className="block font-semibold text-slate-700 mb-1">Hourly Rate (PKR)</label>
+                    <input
+                      id="prof-rate"
+                      type="number"
+                      min={500}
+                      value={hourlyRatePkr}
+                      onChange={(e) => setHourlyRatePkr(Number(e.target.value))}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-mono tabular-nums"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="prof-availability" className="block font-semibold text-slate-700 mb-1">Availability</label>
+                    <select
+                      id="prof-availability"
+                      value={availability}
+                      onChange={(e) => setAvailability(e.target.value as 'available' | 'busy' | 'unavailable')}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+                    >
+                      <option value="available">Available Now</option>
+                      <option value="busy">In Active Sprint (Limited)</option>
+                      <option value="unavailable">Booked / Unavailable</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="prof-skills" className="block font-semibold text-slate-700 mb-1">Skills (comma separated)</label>
+                  <input
+                    id="prof-skills"
+                    type="text"
+                    value={skillsText}
+                    onChange={(e) => setSkillsText(e.target.value)}
+                    placeholder="e.g. React, TypeScript, Figma, Node.js"
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
               <span className="text-[11px] text-slate-500">

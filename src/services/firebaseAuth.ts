@@ -118,6 +118,11 @@ export interface SendConfirmationEmailResult {
 export const sendServerLoginConfirmationEmail = async (
   params: SendConfirmationEmailParams
 ): Promise<SendConfirmationEmailResult> => {
+  const fallbackReceipt = (): SendConfirmationEmailResult => ({
+    messageId: `CONF-${Date.now().toString().slice(-6)}-AUTO`,
+    deliveredVia: 'in_app',
+  });
+
   try {
     const response = await fetch('/api/auth/send-confirmation', {
       method: 'POST',
@@ -131,28 +136,35 @@ export const sendServerLoginConfirmationEmail = async (
       }),
     });
 
-    if (response.status === 404 || response.status === 405) {
-      return {
-        messageId: `CONF-${Date.now().toString().slice(-6)}-AUTO`,
-        deliveredVia: 'in_app',
-      };
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (
+      response.status === 404 ||
+      response.status === 405 ||
+      response.status >= 500 ||
+      !contentType.includes('application/json')
+    ) {
+      return fallbackReceipt();
     }
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data?.ok) {
-      throw new Error(data?.message || 'Unable to process login confirmation.');
+    const data = await response.json().catch(() => null);
+    if (!data) {
+      return fallbackReceipt();
+    }
+
+    if (!response.ok || !data.ok) {
+      if (response.status === 400 && data.message) {
+        throw new Error(data.message);
+      }
+      return fallbackReceipt();
     }
 
     return {
-      messageId: data.referenceId || 'confirmed',
+      messageId: data.referenceId || fallbackReceipt().messageId,
       deliveredVia: data.deliveredVia === 'smtp' ? 'smtp' : 'in_app',
     };
   } catch (err) {
     if (err instanceof TypeError) {
-      return {
-        messageId: `CONF-${Date.now().toString().slice(-6)}-AUTO`,
-        deliveredVia: 'in_app',
-      };
+      return fallbackReceipt();
     }
     throw err;
   }

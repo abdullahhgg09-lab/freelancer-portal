@@ -15,7 +15,8 @@ import {
   Copy,
   Check,
   Wifi,
-  LogIn
+  LogIn,
+  Search
 } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '../data/mockData';
 
@@ -35,10 +36,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, setCurrent
     addProject,
     addClient,
     openProjectChat,
+    directoryFreelancers,
   } = usePortal();
 
   // Hire & Project Brief Modal state
   const [isHireModalOpen, setIsHireModalOpen] = useState(false);
+  const [selectedFreelancerId, setSelectedFreelancerId] = useState<string>(
+    directoryFreelancers[0]?.id || 'user-admin'
+  );
   const [clientFullName, setClientFullName] = useState('');
   const [clientCompany, setClientCompany] = useState('');
   const [clientEmail, setClientEmail] = useState('');
@@ -69,20 +74,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, setCurrent
     const clientUserId = `user-client-${Date.now()}`;
     const cleanEmail = clientEmail.trim().toLowerCase();
 
+    const chosenFreelancer =
+      directoryFreelancers.find((f) => f.id === selectedFreelancerId) || directoryFreelancers[0];
+    const targetFreelancerId = chosenFreelancer?.id || 'user-admin';
+    const targetFreelancerName = chosenFreelancer?.name || 'ABBDULLAH';
+
     addClient({
       userId: clientUserId,
       name: clientFullName.trim(),
       email: cleanEmail,
       company: clientCompany.trim() || 'Direct Client',
       phone: clientPhone.trim(),
-      freelancerId: 'user-admin',
+      freelancerId: targetFreelancerId,
       status: 'active',
     });
 
     const newProj = addProject({
       name: projectTitle.trim(),
-      freelancerId: 'user-admin',
-      freelancerName: 'ABBDULLAH',
+      freelancerId: targetFreelancerId,
+      freelancerName: targetFreelancerName,
       clientId: clientUserId,
       clientName: `${clientFullName.trim()} (${clientCompany.trim() || 'Direct Client'})`,
       budget: Number(projectBudget),
@@ -159,13 +169,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, setCurrent
 
                 <button
                   type="button"
+                  onClick={() => setCurrentView('freelancers')}
+                  className="px-4 py-3.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-semibold text-xs sm:text-sm transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Search className="w-4 h-4" aria-hidden="true" />
+                  <span>Find Freelancers</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     switchRole('freelancer');
                     setCurrentView('freelancer');
                   }}
-                  className="px-4 py-3.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-semibold text-xs sm:text-sm transition flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-3.5 rounded-xl bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold text-xs sm:text-sm transition flex items-center gap-2 cursor-pointer"
                 >
-                  <Briefcase className="w-4 h-4" aria-hidden="true" />
+                  <Briefcase className="w-4 h-4 text-indigo-600" aria-hidden="true" />
                   <span>Freelancer Workspace</span>
                 </button>
 
@@ -629,16 +648,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, setCurrent
                         </div>
                       </div>
 
-                      <div>
-                        <label htmlFor="hire-project-budget" className="block font-semibold text-slate-700 mb-1">Estimated Budget (PKR) *</label>
-                        <input
-                          id="hire-project-budget"
-                          type="number"
-                          required
-                          value={projectBudget}
-                          onChange={(e) => setProjectBudget(Number(e.target.value))}
-                          className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-mono tabular-nums"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label htmlFor="hire-freelancer-select" className="block font-semibold text-slate-700 mb-1">Choose Freelancer *</label>
+                          <select
+                            id="hire-freelancer-select"
+                            value={selectedFreelancerId}
+                            onChange={(e) => setSelectedFreelancerId(e.target.value)}
+                            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+                          >
+                            {directoryFreelancers.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name} — {f.category}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label htmlFor="hire-project-budget" className="block font-semibold text-slate-700 mb-1">Estimated Budget (PKR) *</label>
+                          <input
+                            id="hire-project-budget"
+                            type="number"
+                            required
+                            value={projectBudget}
+                            onChange={(e) => setProjectBudget(Number(e.target.value))}
+                            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-mono tabular-nums"
+                          />
+                        </div>
                       </div>
 
                       <div>

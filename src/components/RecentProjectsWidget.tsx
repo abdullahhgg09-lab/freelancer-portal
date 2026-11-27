@@ -168,10 +168,13 @@ export const RecentProjectsWidget: React.FC<RecentProjectsWidgetProps> = ({
                       type="button"
                       onClick={() => openProjectChat(project.id)}
                       className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-indigo-600 text-white text-[11px] font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 tabular-nums"
-                      title="Open live project discussion room"
+                      title={viewMode === 'client' ? 'Message your assigned freelancer' : 'Message your assigned client'}
                     >
                       <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Chat{projectMsgCount > 0 ? ` (${projectMsgCount})` : ''}</span>
+                      <span>
+                        {viewMode === 'client' ? 'Message Freelancer' : 'Message Client'}
+                        {projectMsgCount > 0 ? ` (${projectMsgCount})` : ''}
+                      </span>
                     </button>
                   </div>
 

@@ -14,7 +14,9 @@ import { AnimatedGuideVideo } from './components/AnimatedGuideVideo';
 import { RealTimePaymentModal } from './components/RealTimePaymentModal';
 import { LiveDeploymentModal } from './components/LiveDeploymentModal';
 import { ProjectChatDrawer } from './components/ProjectChatRoom';
+import { ChatNotificationToast } from './components/ChatNotificationToast';
 import { GmailConfirmationModal } from './components/GmailConfirmationModal';
+import { FindFreelancersView } from './components/FindFreelancersView';
 import { Layers } from 'lucide-react';
 import { UserRole } from './types';
 
@@ -116,6 +118,13 @@ function MainAppContent() {
               />
             )}
 
+            {currentView === 'freelancers' && (
+              <FindFreelancersView
+                onOpenAuth={() => setCurrentView('auth')}
+                onNavigateView={setCurrentView}
+              />
+            )}
+
             {currentView === 'admin' && isAdminAuthenticated && <AdminPanel />}
             {currentView === 'admin' && !isAdminAuthenticated && (
               <LandingPage
@@ -161,6 +170,14 @@ function MainAppContent() {
       <RealTimePaymentModal />
       <LiveDeploymentModal />
       <GmailConfirmationModal />
+      <ChatNotificationToast
+        onOpenChatView={() => {
+          if (currentUser?.role === 'client') setCurrentView('client');
+          else if (currentUser?.role === 'freelancer' || currentUser?.role === 'admin') {
+            setCurrentView('freelancer');
+          }
+        }}
+      />
 
       {/* Minimal SaaS Footer */}
       <footer className="border-t border-slate-200/80 bg-white py-7 text-xs text-slate-500 mt-auto">

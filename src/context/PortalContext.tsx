@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { avatarFreelancerProImg, avatarClientExecImg } from '../assets/images';
+import type { Socket } from 'socket.io-client';
 import {
   User,
   Project,
@@ -7,6 +8,8 @@ import {
   ProjectFile,
   Message,
   MessageTag,
+  Conversation,
+  ChatNotification,
   RoomParticipant,
   TypingParticipant,
   ActivityLog,
@@ -16,7 +19,8 @@ import {
   SupabaseConfig,
   ProjectStatus,
   PayoutSettings,
-  RealtimePaymentRecord
+  RealtimePaymentRecord,
+  FreelancerProfileSummary
 } from '../types';
 import {
   INITIAL_USERS,
@@ -34,6 +38,18 @@ import {
   initFirebaseAuthListener,
   signOutFirebaseAuth,
 } from '../services/firebaseAuth';
+import {
+  createPortalSocket,
+  joinConversationSocket,
+  sendSocketMessage,
+  emitSocketTyping,
+  emitSocketStopTyping,
+  emitSocketMessageRead,
+  type TypingEventPayload,
+  type ReadReceiptEventPayload,
+  type UserPresenceEventPayload,
+  type ChatErrorEventPayload,
+} from '../services/socketClient';
 
 export interface PendingGmailConfirm {
   email: string;
@@ -50,6 +66,26 @@ interface PortalContextType {
   invoices: Invoice[];
   files: ProjectFile[];
   messages: Message[];
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  setActiveConversationId: (conversationId: string | null) => void;
+  onlineUserIds: string[];
+  typingByConversation: Record<string, TypingParticipant[]>;
+  unreadTotalCount: number;
+  chatError: string | null;
+  clearChatError: () => void;
+  incomingChatToast: ChatNotification | null;
+  dismissChatToast: () => void;
+  ensureProjectConversation: (project: Project) => Promise<Conversation | null>;
+  openConversationForProject: (project: Project) => Promise<void>;
+  markConversationRead: (conversationId: string) => Promise<void>;
+  sendChatMessage: (
+    conversationId: string,
+    content: string,
+    tag?: MessageTag
+  ) => Promise<{ ok: boolean; message?: Message; error?: string }>;
+  emitTyping: (conversationId: string) => void;
+  emitStopTyping: (conversationId: string) => void;
   activityLogs: ActivityLog[];
   supabaseConfig: SupabaseConfig;
   currency: 'PKR' | 'USD';
@@ -143,6 +179,8 @@ interface PortalContextType {
   toggleUserStatus: (userId: string) => void;
   upgradePlan: (plan: SubscriptionPlanId) => void;
   saveSupabaseConfig: (url: string, key: string) => Promise<{ success: boolean; message: string }>;
+  directoryFreelancers: FreelancerProfileSummary[];
+  startInquiryChatWithFreelancer: (freelancer: FreelancerProfileSummary) => string;
   resetDemoData: () => void;
   resetSandboxData: () => Promise<void>;
 }
@@ -247,23 +285,48 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
   const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<Invoice | null>(null);
   const [activeChatProjectId, setActiveChatProjectId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
+  const [typingByConversation, setTypingByConversation] = useState<Record<string, TypingParticipant[]>>({});
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [incomingChatToast, setIncomingChatToast] = useState<ChatNotification | null>(null);
+  const [chatToken, setChatToken] = useState<string | null>(null);
   const [pendingGmailConfirm, setPendingGmailConfirm] = useState<PendingGmailConfirm | null>(null);
-  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'offline'>('connecting');
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'offline'>('offline');
   const [roomPresence, setRoomPresence] = useState<Record<string, RoomParticipant[]>>({});
   const [roomTyping, setRoomTyping] = useState<Record<string, TypingParticipant[]>>({});
+  const [serverFreelancers, setServerFreelancers] = useState<FreelancerProfileSummary[]>([]);
 
   useEffect(() => {
     const unsubscribe = initFirebaseAuthListener();
     return () => unsubscribe();
   }, []);
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
-  const joinedRoomsRef = useRef<Set<string>>(new Set());
+  const joinedConvIdsRef = useRef<Set<string>>(new Set());
+  const chatTokenRef = useRef<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+  const activeChatProjectIdRef = useRef<string | null>(null);
   const currentUserRef = useRef<User | null>(currentUser);
+  const usersRef = useRef<User[]>(users);
+
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
+  useEffect(() => {
+    chatTokenRef.current = chatToken;
+  }, [chatToken]);
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+  useEffect(() => {
+    activeChatProjectIdRef.current = activeChatProjectId;
+  }, [activeChatProjectId]);
 
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => {
     const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
@@ -278,7 +341,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   });
 
-  // Sync state to localStorage (never persist admin sessions to localStorage)
+  // Sync state to localStorage (never persist admin sessions or chat tokens to localStorage)
   useEffect(() => saveStored(STORAGE_KEYS.USERS, users), [users]);
   useEffect(() => {
     if (currentUser?.role === 'admin') {
@@ -298,19 +361,55 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => saveStored(STORAGE_KEYS.REALTIME_TXS, realtimeTransactions), [realtimeTransactions]);
   useEffect(() => saveStored(STORAGE_KEYS.PRODUCTION_MODE, isProductionMode), [isProductionMode]);
 
-  const mergeIncomingMessages = useCallback((incomingList: Message[]) => {
-    if (!Array.isArray(incomingList) || incomingList.length === 0) return;
-    setMessages((prev) => {
-      const existingIds = new Set(prev.map((m) => m.id));
-      const newOnes = incomingList.filter((m) => m && m.id && !existingIds.has(m.id));
-      if (newOnes.length === 0) return prev;
-      return [...prev, ...newOnes].sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-    });
+  const normalizeMessageRecord = useCallback((raw: any): Message => {
+    const msgId = String(raw.messageId || raw.id);
+    const createdAt = String(raw.createdAt || raw.timestamp || new Date().toISOString());
+    const text = String(raw.message ?? raw.content ?? '');
+    return {
+      ...raw,
+      messageId: msgId,
+      id: msgId,
+      conversationId: String(raw.conversationId || `conv-${raw.projectId || 'general'}`),
+      message: text,
+      content: text,
+      messageType: raw.messageType || raw.tag || 'general',
+      tag: raw.tag || raw.messageType || 'general',
+      isRead: Boolean(raw.isRead),
+      createdAt,
+      timestamp: createdAt,
+    };
   }, []);
 
-  // Cross-tab synchronization so Client and Freelancer open in two tabs share created projects/invoices/files immediately
+  const mergeIncomingMessages = useCallback(
+    (incomingList: Message[]) => {
+      if (!Array.isArray(incomingList) || incomingList.length === 0) return;
+      const normalized = incomingList.filter((m) => m && (m.messageId || m.id)).map(normalizeMessageRecord);
+      if (normalized.length === 0) return;
+
+      setMessages((prev) => {
+        const byId = new Map<string, Message>();
+        for (const m of prev) {
+          const nm = normalizeMessageRecord(m);
+          byId.set(nm.messageId, nm);
+        }
+        let changed = false;
+        for (const nm of normalized) {
+          const existing = byId.get(nm.messageId);
+          if (!existing || existing.isRead !== nm.isRead || existing.conversationId !== nm.conversationId) {
+            byId.set(nm.messageId, { ...(existing || {}), ...nm });
+            changed = true;
+          }
+        }
+        if (!changed) return prev;
+        return Array.from(byId.values()).sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+    },
+    [normalizeMessageRecord]
+  );
+
+  // Cross-tab synchronization for local workspace state
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleStorage = (e: StorageEvent) => {
@@ -331,11 +430,110 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => window.removeEventListener('storage', handleStorage);
   }, [mergeIncomingMessages]);
 
-  // Real-time WebSocket + BroadcastChannel connection
+  // Fetch public freelancers directory on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    fetch('/api/freelancers')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data?.freelancers)) {
+          setServerFreelancers(data.freelancers);
+        }
+      })
+      .catch(() => {
+        // Ignore on static host
+      });
+  }, []);
 
-    // Secondary multi-tab BroadcastChannel sync
+  // Mint signed server chat session token whenever currentUser changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!currentUser) {
+      setChatToken(null);
+      setConversations([]);
+      setOnlineUserIds([]);
+      setWsStatus('offline');
+      return;
+    }
+
+    if (currentUser.role === 'admin' && !adminToken) {
+      setChatToken(null);
+      return;
+    }
+
+    let cancelled = false;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (currentUser.role === 'admin' && adminToken) {
+      headers.Authorization = `Bearer ${adminToken}`;
+    }
+
+    fetch('/api/chat/session', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
+        email: currentUser.email,
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.ok && data.token) {
+          setChatToken(data.token);
+          if (Array.isArray(data.onlineUserIds)) {
+            setOnlineUserIds(data.onlineUserIds);
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setWsStatus('offline');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, currentUser?.name, currentUser?.role, currentUser?.email, adminToken]);
+
+  const clearChatError = useCallback(() => setChatError(null), []);
+  const dismissChatToast = useCallback(() => setIncomingChatToast(null), []);
+
+  const markConversationRead = useCallback(async (conversationId: string) => {
+    if (!conversationId || !currentUserRef.current) return;
+    const readerId = currentUserRef.current.id;
+    const readAt = new Date().toISOString();
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.conversationId === conversationId && m.senderId !== readerId && !m.isRead
+          ? { ...m, isRead: true, readAt }
+          : m
+      )
+    );
+    setConversations((prev) =>
+      prev.map((c) => (c.conversationId === conversationId ? { ...c, unreadCount: 0 } : c))
+    );
+
+    if (socketRef.current?.connected) {
+      await emitSocketMessageRead(socketRef.current, conversationId);
+    } else if (chatTokenRef.current) {
+      fetch(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${chatTokenRef.current}` },
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Connect & maintain authenticated Socket.IO client when chatToken is available
+  useEffect(() => {
+    if (typeof window === 'undefined' || !chatToken || !currentUser) {
+      return;
+    }
+
+    let isUnmounted = false;
+    setWsStatus('connecting');
+
     if ('BroadcastChannel' in window) {
       const channel = new BroadcastChannel('fcp_realtime_chat');
       broadcastRef.current = channel;
@@ -346,160 +544,450 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
     }
 
-    // Initial REST hydration
-    fetch('/api/messages')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.messages) {
-          mergeIncomingMessages(data.messages);
-        }
-      })
-      .catch(() => {
-        // Fallback smoothly if running on static host
-      });
+    const socket = createPortalSocket(chatToken);
+    socketRef.current = socket;
 
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let isUnmounted = false;
-    let attempt = 0;
-
-    const connectWs = () => {
-      if (isUnmounted) return;
-      setWsStatus('connecting');
-      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = new WebSocket(`${wsProto}//${window.location.host}/ws`);
-      wsRef.current = socket;
-
-      socket.onopen = () => {
-        attempt = 0;
-        setWsStatus('connected');
-        // Re-join any active rooms using latest currentUserRef
-        const activeUser = currentUserRef.current;
-        for (const roomId of joinedRoomsRef.current) {
-          socket.send(
-            JSON.stringify({
-              type: 'room:join',
-              projectId: roomId,
-              userId: activeUser?.id || 'guest',
-              userName: activeUser?.name || 'Portal User',
-              userRole: activeUser?.role || 'client',
+    const hydrateConversations = async () => {
+      try {
+        const res = await fetch('/api/conversations', {
+          headers: { Authorization: `Bearer ${chatToken}` },
+        });
+        if (!res.ok || isUnmounted) return;
+        const data = await res.json();
+        if (Array.isArray(data?.conversations)) {
+          setConversations(data.conversations);
+          if (Array.isArray(data.onlineUserIds)) {
+            setOnlineUserIds(data.onlineUserIds);
+          }
+          // Hydrate message history for each authorized conversation
+          await Promise.all(
+            data.conversations.map(async (conv: Conversation) => {
+              joinedConvIdsRef.current.add(conv.conversationId);
+              if (socket.connected) {
+                const ack = await joinConversationSocket(socket, { conversationId: conv.conversationId });
+                if (ack.ok && Array.isArray(ack.messages)) {
+                  mergeIncomingMessages(ack.messages);
+                }
+              } else {
+                const msgRes = await fetch(`/api/conversations/${encodeURIComponent(conv.conversationId)}/messages`, {
+                  headers: { Authorization: `Bearer ${chatToken}` },
+                });
+                if (msgRes.ok) {
+                  const msgData = await msgRes.json();
+                  if (Array.isArray(msgData?.messages)) {
+                    mergeIncomingMessages(msgData.messages);
+                  }
+                }
+              }
             })
           );
         }
-      };
-
-      socket.onmessage = (evt) => {
-        try {
-          const event = JSON.parse(evt.data);
-          if (event.type === 'init:messages' && Array.isArray(event.payload)) {
-            mergeIncomingMessages(event.payload);
-          } else if (event.type === 'message:created' && event.payload) {
-            mergeIncomingMessages([event.payload as Message]);
-          } else if (event.type === 'presence:update' && event.projectId) {
-            setRoomPresence((prev) => ({
-              ...prev,
-              [event.projectId]: Array.isArray(event.users) ? event.users : [],
-            }));
-          } else if (event.type === 'typing:update' && event.projectId && event.userId) {
-            setRoomTyping((prev) => {
-              const current = prev[event.projectId] || [];
-              if (event.isTyping) {
-                if (current.some((u) => u.userId === event.userId)) return prev;
-                return {
-                  ...prev,
-                  [event.projectId]: [...current, { userId: event.userId, userName: event.userName || 'User' }],
-                };
-              } else {
-                return {
-                  ...prev,
-                  [event.projectId]: current.filter((u) => u.userId !== event.userId),
-                };
-              }
-            });
-          } else if (event.type === 'sandbox:reset') {
-            setMessages([]);
-          }
-        } catch {
-          // Ignore malformed WS payloads
-        }
-      };
-
-      socket.onclose = () => {
-        setWsStatus('offline');
-        if (!isUnmounted) {
-          const delay = Math.min(8000, 1000 * Math.pow(1.5, attempt++));
-          retryTimer = setTimeout(connectWs, delay);
-        }
-      };
-
-      socket.onerror = () => {
-        socket.close();
-      };
+      } catch {
+        // Ignore transient network errors
+      }
     };
 
-    connectWs();
+    socket.on('connect', () => {
+      if (isUnmounted) return;
+      setWsStatus('connected');
+      setChatError(null);
+      void hydrateConversations();
+      for (const convId of joinedConvIdsRef.current) {
+        void joinConversationSocket(socket, { conversationId: convId }).then((ack) => {
+          if (ack.ok && Array.isArray(ack.messages)) {
+            mergeIncomingMessages(ack.messages);
+          }
+        });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      if (!isUnmounted) setWsStatus('offline');
+    });
+
+    socket.on('connect_error', () => {
+      if (!isUnmounted) setWsStatus('offline');
+    });
+
+    socket.on('online-users', (payload: { userIds?: string[] }) => {
+      if (Array.isArray(payload?.userIds)) {
+        setOnlineUserIds(payload.userIds);
+      }
+    });
+
+    socket.on('user-online', (payload: UserPresenceEventPayload) => {
+      if (!payload?.userId) return;
+      setOnlineUserIds((prev) => (prev.includes(payload.userId) ? prev : [...prev, payload.userId]));
+    });
+
+    socket.on('user-offline', (payload: UserPresenceEventPayload) => {
+      if (!payload?.userId) return;
+      setOnlineUserIds((prev) => prev.filter((id) => id !== payload.userId));
+    });
+
+    socket.on('conversation:updated', (conv: Conversation) => {
+      if (!conv?.conversationId) return;
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.conversationId === conv.conversationId);
+        if (exists) {
+          return prev.map((c) => (c.conversationId === conv.conversationId ? { ...c, ...conv } : c));
+        }
+        return [conv, ...prev];
+      });
+      joinedConvIdsRef.current.add(conv.conversationId);
+      void joinConversationSocket(socket, { conversationId: conv.conversationId });
+    });
+
+    socket.on('receive-message', (rawMsg: Message) => {
+      const msg = normalizeMessageRecord(rawMsg);
+      mergeIncomingMessages([msg]);
+
+      const viewerId = currentUserRef.current?.id;
+      const isFromPartner = Boolean(viewerId && msg.senderId !== viewerId);
+      const isViewingThisConversation =
+        activeConversationIdRef.current === msg.conversationId ||
+        activeChatProjectIdRef.current === msg.projectId;
+
+      if (isFromPartner && isViewingThisConversation) {
+        void emitSocketMessageRead(socket, msg.conversationId, [msg.messageId]);
+      }
+
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.conversationId === msg.conversationId);
+        if (idx === -1) {
+          const isSenderClient = msg.senderRole === 'client';
+          const createdConv: Conversation = {
+            conversationId: msg.conversationId,
+            clientId: isSenderClient ? msg.senderId : msg.recipientId,
+            freelancerId: isSenderClient ? msg.recipientId : msg.senderId,
+            projectId: msg.projectId,
+            projectName: msg.projectName,
+            clientName: isSenderClient ? msg.senderName : msg.recipientName,
+            freelancerName: isSenderClient ? msg.recipientName : msg.senderName,
+            lastMessage: msg.message,
+            lastMessageAt: msg.createdAt,
+            unreadCount: isFromPartner && !isViewingThisConversation ? 1 : 0,
+            createdAt: msg.createdAt,
+            updatedAt: msg.createdAt,
+          };
+          return [createdConv, ...prev];
+        }
+        const updated = [...prev];
+        const target = updated[idx];
+        updated[idx] = {
+          ...target,
+          lastMessage: msg.message,
+          lastMessageAt: msg.createdAt,
+          updatedAt: msg.createdAt,
+          unreadCount:
+            isFromPartner && !isViewingThisConversation ? (target.unreadCount || 0) + 1 : 0,
+        };
+        return updated.sort(
+          (a, b) => new Date(b.lastMessageAt || b.updatedAt).getTime() - new Date(a.lastMessageAt || a.updatedAt).getTime()
+        );
+      });
+
+      if (isFromPartner && !isViewingThisConversation) {
+        setIncomingChatToast({
+          id: msg.messageId,
+          conversationId: msg.conversationId,
+          projectId: msg.projectId,
+          projectName: msg.projectName || 'Project Chat',
+          senderId: msg.senderId,
+          senderName: msg.senderName,
+          message: msg.message,
+          createdAt: msg.createdAt,
+        });
+      }
+    });
+
+    socket.on('typing', (payload: TypingEventPayload) => {
+      if (!payload?.conversationId || !payload.userId) return;
+      if (payload.userId === currentUserRef.current?.id) return;
+
+      setTypingByConversation((prev) => {
+        const current = prev[payload.conversationId] || [];
+        if (current.some((u) => u.userId === payload.userId)) return prev;
+        return {
+          ...prev,
+          [payload.conversationId]: [...current, { userId: payload.userId, userName: payload.userName || 'User' }],
+        };
+      });
+
+      if (payload.projectId) {
+        setRoomTyping((prev) => {
+          const current = prev[payload.projectId!] || [];
+          if (current.some((u) => u.userId === payload.userId)) return prev;
+          return {
+            ...prev,
+            [payload.projectId!]: [...current, { userId: payload.userId, userName: payload.userName || 'User' }],
+          };
+        });
+      }
+    });
+
+    socket.on('stop-typing', (payload: TypingEventPayload) => {
+      if (!payload?.conversationId || !payload.userId) return;
+      setTypingByConversation((prev) => ({
+        ...prev,
+        [payload.conversationId]: (prev[payload.conversationId] || []).filter((u) => u.userId !== payload.userId),
+      }));
+      if (payload.projectId) {
+        setRoomTyping((prev) => ({
+          ...prev,
+          [payload.projectId!]: (prev[payload.projectId!] || []).filter((u) => u.userId !== payload.userId),
+        }));
+      }
+    });
+
+    socket.on('message-read', (payload: ReadReceiptEventPayload) => {
+      if (!payload?.conversationId || !Array.isArray(payload.messageIds)) return;
+      const readSet = new Set(payload.messageIds);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.conversationId === payload.conversationId && readSet.has(m.messageId)
+            ? { ...m, isRead: true, readAt: payload.readAt }
+            : m
+        )
+      );
+      if (payload.readBy === currentUserRef.current?.id) {
+        setConversations((prev) =>
+          prev.map((c) => (c.conversationId === payload.conversationId ? { ...c, unreadCount: 0 } : c))
+        );
+      }
+    });
+
+    socket.on('chat-error', (payload: ChatErrorEventPayload) => {
+      if (payload?.message) {
+        setChatError(payload.message);
+      }
+    });
+
+    socket.on('freelancers:updated', (payload: { freelancers?: FreelancerProfileSummary[] }) => {
+      if (Array.isArray(payload?.freelancers)) {
+        setServerFreelancers(payload.freelancers);
+      }
+    });
+
+    socket.on('sandbox:reset', () => {
+      setMessages([]);
+      setConversations((prev) => prev.map((c) => ({ ...c, lastMessage: undefined, unreadCount: 0 })));
+    });
 
     return () => {
       isUnmounted = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      socket.disconnect();
+      socketRef.current = null;
       if (broadcastRef.current) {
         broadcastRef.current.close();
+        broadcastRef.current = null;
       }
     };
-  }, [mergeIncomingMessages]);
+  }, [chatToken, currentUser?.id, mergeIncomingMessages, normalizeMessageRecord]);
+
+  // Sync onlineUserIds -> legacy roomPresence keyed by projectId for smooth UI badges
+  useEffect(() => {
+    const nextPresence: Record<string, RoomParticipant[]> = {};
+    for (const conv of conversations) {
+      const activeList: RoomParticipant[] = [];
+      if (onlineUserIds.includes(conv.clientId)) {
+        activeList.push({ userId: conv.clientId, userName: conv.clientName || 'Client', userRole: 'client' });
+      }
+      if (onlineUserIds.includes(conv.freelancerId)) {
+        activeList.push({ userId: conv.freelancerId, userName: conv.freelancerName || 'Freelancer', userRole: 'freelancer' });
+      }
+      nextPresence[conv.projectId] = activeList;
+    }
+    setRoomPresence(nextPresence);
+  }, [conversations, onlineUserIds]);
+
+  const ensureProjectConversation = useCallback(
+    async (project: Project): Promise<Conversation | null> => {
+      const user = currentUserRef.current;
+      const token = chatTokenRef.current;
+      if (!user || !project) return null;
+
+      // Only participants can create/open a private project conversation
+      if (user.id !== project.clientId && user.id !== project.freelancerId) {
+        setChatError('Unauthorized: you are not assigned to this project conversation.');
+        return null;
+      }
+
+      const clientAvatar = usersRef.current.find((u) => u.id === project.clientId)?.avatarUrl;
+      const freelancerAvatar = usersRef.current.find((u) => u.id === project.freelancerId)?.avatarUrl;
+
+      if (token) {
+        try {
+          const res = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              projectId: project.id,
+              clientId: project.clientId,
+              freelancerId: project.freelancerId,
+              projectName: project.name,
+              clientName: project.clientName,
+              freelancerName: project.freelancerName,
+              clientAvatar,
+              freelancerAvatar,
+            }),
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data?.conversation) {
+            const conv = data.conversation as Conversation;
+            setConversations((prev) => {
+              const exists = prev.some((c) => c.conversationId === conv.conversationId);
+              if (exists) return prev.map((c) => (c.conversationId === conv.conversationId ? { ...c, ...conv } : c));
+              return [conv, ...prev];
+            });
+            if (Array.isArray(data.messages)) {
+              mergeIncomingMessages(data.messages);
+            }
+            joinedConvIdsRef.current.add(conv.conversationId);
+            if (socketRef.current?.connected) {
+              await joinConversationSocket(socketRef.current, { conversationId: conv.conversationId });
+            }
+            return conv;
+          } else if (data?.message) {
+            setChatError(data.message);
+          }
+        } catch {
+          // Fallback silently to local conversation placeholder if offline
+        }
+      }
+
+      const existing = conversations.find(
+        (c) =>
+          c.projectId === project.id &&
+          c.clientId === project.clientId &&
+          c.freelancerId === project.freelancerId
+      );
+      return existing || null;
+    },
+    [conversations, mergeIncomingMessages]
+  );
+
+  // Auto-sync conversations for projects belonging to the signed-in user once chatToken is ready
+  useEffect(() => {
+    if (!chatToken || !currentUser || projects.length === 0) return;
+    const myOwned = projects.filter(
+      (p) => p.clientId === currentUser.id || p.freelancerId === currentUser.id
+    );
+    for (const proj of myOwned) {
+      const alreadyLoaded = conversations.some((c) => c.projectId === proj.id);
+      if (!alreadyLoaded) {
+        void ensureProjectConversation(proj);
+      }
+    }
+  }, [chatToken, currentUser?.id, projects, conversations, ensureProjectConversation]);
 
   const joinProjectRoom = useCallback(
     (projectId: string) => {
       if (!projectId) return;
-      joinedRoomsRef.current.add(projectId);
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'room:join',
-            projectId,
-            userId: currentUser?.id || 'guest',
-            userName: currentUser?.name || 'Portal User',
-            userRole: currentUser?.role || 'client',
-          })
-        );
+      const proj = projects.find((p) => p.id === projectId);
+      const conv = conversations.find((c) => c.projectId === projectId);
+      if (conv) {
+        joinedConvIdsRef.current.add(conv.conversationId);
+        if (socketRef.current?.connected) {
+          void joinConversationSocket(socketRef.current, { conversationId: conv.conversationId }).then((ack) => {
+            if (ack.ok && Array.isArray(ack.messages)) {
+              mergeIncomingMessages(ack.messages);
+            }
+          });
+        }
+        void markConversationRead(conv.conversationId);
+      } else if (proj) {
+        void ensureProjectConversation(proj).then((created) => {
+          if (created) void markConversationRead(created.conversationId);
+        });
       }
     },
-    [currentUser?.id, currentUser?.name, currentUser?.role]
+    [projects, conversations, mergeIncomingMessages, ensureProjectConversation, markConversationRead]
   );
 
   const leaveProjectRoom = useCallback((projectId: string) => {
     if (!projectId) return;
-    joinedRoomsRef.current.delete(projectId);
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'room:leave',
-          projectId,
-        })
-      );
+    const conv = conversations.find((c) => c.projectId === projectId);
+    if (conv && socketRef.current?.connected) {
+      emitSocketStopTyping(socketRef.current, conv.conversationId);
     }
+  }, [conversations]);
+
+  const emitTyping = useCallback((conversationId: string) => {
+    if (!conversationId) return;
+    emitSocketTyping(socketRef.current, conversationId);
+  }, []);
+
+  const emitStopTyping = useCallback((conversationId: string) => {
+    if (!conversationId) return;
+    emitSocketStopTyping(socketRef.current, conversationId);
   }, []);
 
   const sendTypingState = useCallback(
     (projectId: string, isTyping: boolean) => {
-      if (!projectId || wsRef.current?.readyState !== WebSocket.OPEN) return;
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'typing:state',
-          projectId,
-          userId: currentUser?.id || 'guest',
-          userName: currentUser?.name || 'Portal User',
-          isTyping,
-        })
-      );
+      const conv = conversations.find((c) => c.projectId === projectId);
+      if (!conv) return;
+      if (isTyping) emitSocketTyping(socketRef.current, conv.conversationId);
+      else emitSocketStopTyping(socketRef.current, conv.conversationId);
     },
-    [currentUser?.id, currentUser?.name]
+    [conversations]
   );
 
-  const openProjectChat = useCallback((projectId: string) => {
-    setActiveChatProjectId(projectId);
+  const openConversationForProject = useCallback(
+    async (project: Project) => {
+      const conv = await ensureProjectConversation(project);
+      if (conv) {
+        setActiveConversationId(conv.conversationId);
+        await markConversationRead(conv.conversationId);
+      }
+      setActiveChatProjectId(project.id);
+    },
+    [ensureProjectConversation, markConversationRead]
+  );
+
+  const openProjectChat = useCallback(
+    (projectId: string) => {
+      const proj = projects.find((p) => p.id === projectId);
+      if (proj) {
+        void openConversationForProject(proj);
+      } else {
+        setActiveChatProjectId(projectId);
+      }
+    },
+    [projects, openConversationForProject]
+  );
+
+  const unreadTotalCount = React.useMemo(() => {
+    if (!currentUser) return 0;
+    return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+  }, [conversations, currentUser]);
+
+  const syncFreelancerDirectoryProfile = useCallback((user: User) => {
+    if (user.role !== 'freelancer' && user.role !== 'admin') return;
+    fetch('/api/freelancers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        company: user.company,
+        bio: user.bio,
+        address: user.address,
+        headline: user.headline,
+        category: user.category,
+        skills: user.skills,
+        hourlyRatePkr: user.hourlyRatePkr,
+        availability: user.availability || 'available',
+        isListedInDirectory: user.isListedInDirectory !== false,
+      }),
+    }).catch(() => {
+      // Ignore if running on static host without API
+    });
   }, []);
 
   const logActivity = (action: string, details: string, category: ActivityLog['category'] = 'system') => {
@@ -629,6 +1117,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
       setUsers((prev) => [...prev, newUser]);
       setCurrentUser(newUser);
+      syncFreelancerDirectoryProfile(newUser);
       logActivity('Freelancer Registered', `New freelancer registered: ${newUser.name}`, 'auth');
       if (newUser.email && newUser.email.includes('@')) {
         setPendingGmailConfirm({
@@ -685,6 +1174,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     setCurrentUser(matchedUser);
+    syncFreelancerDirectoryProfile(matchedUser);
     logActivity('Google Sign In', `${matchedUser.name} authenticated via Google Account (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
 
     if (triggerGmailConfirm && matchedUser.email) {
@@ -735,6 +1225,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     setCurrentUser(matchedUser);
+    syncFreelancerDirectoryProfile(matchedUser);
     logActivity('Apple ID Sign In', `${matchedUser.name} authenticated via Apple ID (${matchedUser.email}) as ${matchedUser.role}`, 'auth');
     if (matchedUser.email) {
       setPendingGmailConfirm({
@@ -776,6 +1267,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setUsers((prev) => [...prev, newUser]);
     setCurrentUser(newUser);
+    syncFreelancerDirectoryProfile(newUser);
     logActivity('User Registered', `New ${userData.role} registered: ${newUser.name} (${newUser.email})`, 'auth');
     if (newUser.email && newUser.email.includes('@')) {
       setPendingGmailConfirm({
@@ -796,6 +1288,7 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     setCurrentUser(updatedUser);
     setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    syncFreelancerDirectoryProfile(updatedUser);
     logActivity('Profile Updated', `${updatedUser.name} updated their profile info and avatar`, 'auth');
   };
 
@@ -1066,12 +1559,13 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
 
-    // Prefer a user matching the requested role (if client, prefer one owning an active project)
+    // Prefer a user matching the requested role who owns an active project
     const match =
       role === 'client'
         ? users.find((u) => u.role === 'client' && projects.some((p) => p.clientId === u.id)) ||
           users.find((u) => u.role === 'client')
-        : users.find((u) => u.role === role);
+        : users.find((u) => u.role === 'freelancer' && projects.some((p) => p.freelancerId === u.id)) ||
+          users.find((u) => u.role === role);
 
     if (match) {
       setCurrentUser(match);
@@ -1105,6 +1599,13 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       createdAt: new Date().toISOString(),
     };
     setProjects((prev) => [newProject, ...prev]);
+    if (
+      currentUserRef.current &&
+      (currentUserRef.current.id === newProject.clientId ||
+        currentUserRef.current.id === newProject.freelancerId)
+    ) {
+      void ensureProjectConversation(newProject);
+    }
     logActivity('Project Created', `Created project "${newProject.name}" with budget Rs. ${newProject.budget.toLocaleString()}`, 'project');
     return newProject;
   };
@@ -1186,6 +1687,70 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     logActivity('File Removed', `Removed file "${target?.fileName || id}"`, 'file');
   };
 
+  const sendChatMessage = useCallback(
+    async (
+      conversationId: string,
+      content: string,
+      tag: MessageTag = 'general'
+    ): Promise<{ ok: boolean; message?: Message; error?: string }> => {
+      const clean = content.trim();
+      if (!clean || !conversationId) {
+        return { ok: false, error: 'Message cannot be empty.' };
+      }
+      const user = currentUserRef.current;
+      if (!user) {
+        return { ok: false, error: 'Please sign in to send messages.' };
+      }
+
+      const conv = conversations.find((c) => c.conversationId === conversationId);
+      const clientMsgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      if (socketRef.current?.connected) {
+        const resp = await sendSocketMessage(socketRef.current, {
+          conversationId,
+          message: clean,
+          messageType: tag,
+          messageId: clientMsgId,
+        });
+        if (!resp.ok) {
+          if (resp.error) setChatError(resp.error);
+          return { ok: false, error: resp.error || 'Failed to send message.' };
+        }
+        if (resp.message) {
+          const saved = normalizeMessageRecord(resp.message);
+          mergeIncomingMessages([saved]);
+          return { ok: true, message: saved };
+        }
+      }
+
+      // Offline / disconnected optimistic fallback
+      const now = new Date().toISOString();
+      const isClient = conv ? conv.clientId === user.id : user.role === 'client';
+      const fallbackMsg: Message = {
+        messageId: clientMsgId,
+        id: clientMsgId,
+        conversationId,
+        projectId: conv?.projectId || 'general',
+        projectName: conv?.projectName,
+        senderId: user.id,
+        senderName: user.name,
+        senderRole: user.role,
+        recipientId: conv ? (isClient ? conv.freelancerId : conv.clientId) : 'partner',
+        recipientName: conv ? (isClient ? conv.freelancerName || 'Freelancer' : conv.clientName || 'Client') : 'Partner',
+        message: clean,
+        content: clean,
+        messageType: tag,
+        tag,
+        isRead: false,
+        createdAt: now,
+        timestamp: now,
+      };
+      mergeIncomingMessages([fallbackMsg]);
+      return { ok: true, message: fallbackMsg };
+    },
+    [conversations, mergeIncomingMessages, normalizeMessageRecord]
+  );
+
   const sendMessage = (
     projectId: string,
     content: string,
@@ -1194,8 +1759,14 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     tag: MessageTag = 'general',
     projectName?: string
   ): Message => {
+    const clean = content.trim();
+    const conv = conversations.find((c) => c.projectId === projectId);
+    const now = new Date().toISOString();
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newMsg: Message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      messageId: msgId,
+      id: msgId,
+      conversationId: conv?.conversationId || `conv-${projectId}`,
       projectId,
       projectName,
       senderId: currentUser?.id || 'sys',
@@ -1203,32 +1774,29 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       senderRole: currentUser?.role || 'freelancer',
       recipientId,
       recipientName,
-      content,
+      message: clean,
+      content: clean,
+      messageType: tag,
       tag,
-      timestamp: new Date().toISOString(),
+      isRead: false,
+      createdAt: now,
+      timestamp: now,
     };
-    setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
 
-    // Broadcast over real-time WebSocket if connected
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'message:send',
-          payload: newMsg,
-        })
-      );
+    if (conv && socketRef.current?.connected) {
+      void sendChatMessage(conv.conversationId, clean, tag);
     } else {
-      // REST fallback
-      fetch('/api/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMsg),
-      }).catch(() => {
-        // Offline / static host mode uses localStorage + BroadcastChannel
-      });
+      const proj = projects.find((p) => p.id === projectId);
+      if (proj) {
+        void ensureProjectConversation(proj).then((created) => {
+          if (created) {
+            void sendChatMessage(created.conversationId, clean, tag);
+          }
+        });
+      }
+      setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
     }
 
-    // Secondary BroadcastChannel push for multi-tab instant sync
     if (broadcastRef.current) {
       broadcastRef.current.postMessage({ type: 'message:created', payload: newMsg });
     }
@@ -1310,6 +1878,109 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return result;
   };
 
+  const directoryFreelancers: FreelancerProfileSummary[] = React.useMemo(() => {
+    const map = new Map<string, FreelancerProfileSummary>();
+
+    const toSummary = (u: Partial<User> & { id: string; name: string }): FreelancerProfileSummary => ({
+      id: u.id,
+      name: u.name === 'ABBDULLAH (Super Admin)' ? 'ABBDULLAH' : u.name,
+      username: u.username || u.name.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      avatarUrl: u.avatarUrl,
+      company: u.company || 'Independent Freelancer Studio',
+      bio: u.bio || 'Verified freelancer available for client projects, milestone delivery, and real-time collaboration.',
+      address: u.address || 'Remote / Pakistan',
+      headline: u.headline || (u.id === 'user-admin' ? 'Full-Stack Web & SaaS Product Architect' : 'Full-Stack Freelancer & Digital Specialist'),
+      category: u.category || (u.id === 'user-admin' ? 'SaaS Architecture' : 'Web Development'),
+      skills: u.skills && u.skills.length > 0 ? u.skills : ['Web Development', 'UI/UX Design', 'Client Portal'],
+      hourlyRatePkr: u.hourlyRatePkr && u.hourlyRatePkr > 0 ? u.hourlyRatePkr : 3500,
+      availability: u.availability || 'available',
+      completedProjectsCount: projects.filter((p) => p.freelancerId === u.id && p.status === 'completed').length,
+    });
+
+    for (const sf of serverFreelancers) {
+      map.set(sf.id, toSummary(sf));
+    }
+
+    for (const u of users) {
+      const eligible =
+        (u.role === 'freelancer' || u.id === 'user-admin') &&
+        u.status === 'active' &&
+        u.isListedInDirectory !== false;
+      if (eligible) {
+        map.set(u.id, toSummary(u));
+      }
+    }
+
+    return Array.from(map.values());
+  }, [users, serverFreelancers, projects]);
+
+  const startInquiryChatWithFreelancer = useCallback(
+    (freelancer: FreelancerProfileSummary): string => {
+      let activeClientId = currentUser?.role === 'client' ? currentUser.id : '';
+      let activeClientName = currentUser?.role === 'client' ? currentUser.name : '';
+
+      if (!activeClientId) {
+        const existingClient = users.find((u) => u.role === 'client');
+        if (existingClient) {
+          activeClientId = existingClient.id;
+          activeClientName = existingClient.name;
+          setCurrentUser(existingClient);
+        } else {
+          activeClientId = 'user-client-sandbox';
+          activeClientName = currentUser?.name || 'Guest Client';
+          const newClientUser: User = {
+            id: activeClientId,
+            username: 'client_partner',
+            email: currentUser?.email || 'client@freelanceport.pk',
+            name: activeClientName,
+            role: 'client',
+            avatarUrl: avatarClientExecImg,
+            company: 'Client Workspace',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+          };
+          setUsers((prev) => (prev.some((u) => u.id === activeClientId) ? prev : [...prev, newClientUser]));
+          setCurrentUser(newClientUser);
+        }
+      }
+
+      const existingProj = projects.find(
+        (p) => p.freelancerId === freelancer.id && p.clientId === activeClientId
+      );
+      if (existingProj) {
+        openProjectChat(existingProj.id);
+        return existingProj.id;
+      }
+
+      const inquiryProj: Project = {
+        id: `proj-${Date.now()}`,
+        name: `Project Inquiry — ${freelancer.name}`,
+        freelancerId: freelancer.id,
+        freelancerName: freelancer.name,
+        clientId: activeClientId,
+        clientName: activeClientName,
+        budget: freelancer.hourlyRatePkr * 20,
+        currency: 'PKR',
+        startDate: new Date().toISOString().split('T')[0],
+        deadline: new Date(Date.now() + 21 * 86400000).toISOString().split('T')[0],
+        description: `Direct inquiry conversation with ${freelancer.name} (${freelancer.headline}).`,
+        progress: 0,
+        status: 'pending',
+        category: freelancer.category,
+        tasks: [
+          { id: 't-1', title: 'Initial Scope & Requirements Chat', completed: false },
+          { id: 't-2', title: 'Milestone Proposal & Budget Agreement', completed: false },
+        ],
+        createdAt: new Date().toISOString(),
+      };
+      setProjects((prev) => [inquiryProj, ...prev]);
+      logActivity('Freelancer Inquiry Started', `Started direct discussion with ${freelancer.name}`, 'project');
+      openProjectChat(inquiryProj.id);
+      return inquiryProj.id;
+    },
+    [currentUser, users, projects, openProjectChat]
+  );
+
   const resetDemoData = () => {
     setUsers(INITIAL_USERS);
     setCurrentUser(INITIAL_USERS[0]);
@@ -1346,7 +2017,13 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       },
     ]);
     try {
-      await fetch('/api/sandbox/reset', { method: 'POST' });
+      const authToken = chatTokenRef.current || adminToken;
+      if (authToken) {
+        await fetch('/api/sandbox/reset', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      }
     } catch {
       // ignore if offline
     }
@@ -1362,6 +2039,22 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         invoices,
         files,
         messages,
+        conversations,
+        activeConversationId,
+        setActiveConversationId,
+        onlineUserIds,
+        typingByConversation,
+        unreadTotalCount,
+        chatError,
+        clearChatError,
+        incomingChatToast,
+        dismissChatToast,
+        ensureProjectConversation,
+        openConversationForProject,
+        markConversationRead,
+        sendChatMessage,
+        emitTyping,
+        emitStopTyping,
         activityLogs,
         supabaseConfig,
         currency,
@@ -1419,6 +2112,8 @@ export const PortalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         toggleUserStatus,
         upgradePlan,
         saveSupabaseConfig,
+        directoryFreelancers,
+        startInquiryChatWithFreelancer,
         resetDemoData,
         resetSandboxData,
       }}
